@@ -75,6 +75,10 @@ from .services.operations import (  # noqa: E402
     parameter_contract as parameter_contract_service,
     preview_parameter_changes as preview_parameter_changes_service,
     validate_parameter_values as validate_parameter_values_service,
+    apply_material_binding as apply_material_binding_service,
+    preview_material_binding as preview_material_binding_service,
+    apply_sketch_edit as apply_sketch_edit_service,
+    preview_sketch_edit as preview_sketch_edit_service,
     write_source_package as write_source_package_service,
     get_current_draft as get_current_draft_service,
     set_current_draft as set_current_draft_service,
@@ -144,6 +148,20 @@ class SketchSolveRequest(BaseModel):
     overrides: dict[str, float] = Field(default_factory=dict)
 
 
+class SketchEditRequest(BaseModel):
+    baseRevision: int
+    changes: dict[str, Any] = Field(default_factory=dict)
+    confirmed: bool = False
+
+
+class MaterialBindingAssistanceRequest(BaseModel):
+    baseRevision: int
+    sourceRecordId: str
+    mode: Literal["reference", "copy"] = "copy"
+    role: Literal["minimum", "nominal", "maximum", "special"] = "nominal"
+    confirmed: bool = False
+
+
 material_library = RuiWareMaterialLibrary(MATERIAL_DATABASE)
 repository = Repository(LOCAL_DATABASE, material_library)
 
@@ -173,6 +191,16 @@ def template_authoring_registry():
 @app.post("/api/v1/sketches/solve")
 def solve_sketch(request: SketchSolveRequest):
     return solve_semantic_sketch(request.draft, request.overrides)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/sketch/preview")
+def preview_sketch_edit(draft_id: str, request: SketchEditRequest):
+    return preview_sketch_edit_service(repository, draft_id, request.baseRevision, request.changes)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/sketch/apply")
+def apply_sketch_edit(draft_id: str, request: SketchEditRequest):
+    return apply_sketch_edit_service(repository, draft_id, request.baseRevision, request.changes, request.confirmed)
 
 
 def _now() -> str:
@@ -235,6 +263,16 @@ def material_bindings():
 @app.post("/api/v1/material-bindings", status_code=201)
 def create_material_binding(request: BindingRequest):
     return create_material_binding_service(repository, request.sourceRecordId, request.mode)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/material-binding/preview")
+def preview_material_binding(draft_id: str, request: MaterialBindingAssistanceRequest):
+    return preview_material_binding_service(repository, draft_id, request.baseRevision, request.sourceRecordId, request.mode, request.role)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/material-binding/apply")
+def apply_material_binding(draft_id: str, request: MaterialBindingAssistanceRequest):
+    return apply_material_binding_service(repository, draft_id, request.baseRevision, request.sourceRecordId, request.mode, request.role, request.confirmed)
 
 
 @app.get("/api/v1/material-bindings/{binding_id}/resolved")

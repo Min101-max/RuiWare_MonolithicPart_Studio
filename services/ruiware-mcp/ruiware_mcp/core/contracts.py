@@ -54,4 +54,9 @@ TOOL_CONTRACTS = {
     "ruiware_explain_error": {"required": ("error",), "read_only": True},
     "ruiware_complete_stage": {"required": ("draftId", "stage"), "read_only": False},
     "ruiware_get_current_draft_status": {"required": (), "read_only": True},
+    "ruiware_preview_sketch_edit": {"required": ("draftId", "baseRevision", "changes"), "read_only": True},
+    "ruiware_apply_sketch_edit": {"required": ("draftId", "baseRevision", "changes", "confirmed"), "read_only": False},
+    "ruiware_preview_material_binding": {"required": ("draftId", "baseRevision", "sourceRecordId"), "read_only": True},
+    "ruiware_apply_material_binding": {"required": ("draftId", "baseRevision", "sourceRecordId", "confirmed"), "read_only": False},
+    "ruiware_search_materials": {"required": (), "read_only": True},
 }

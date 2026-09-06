@@ -4,5 +4,6 @@ from .proposals import preview as preview_proposal
 from .proposals import submit as submit_proposal
 from .parameters import apply as apply_parameter_changes, get_contract as get_parameter_contract, preview as preview_parameter_changes, validate as validate_parameter_values
 from .sketch import execute as solve_sketch
+from .phase3 import apply_material, apply_sketch, preview_material, preview_sketch, search_materials
 
-__all__ = ["preview_proposal", "solve_sketch", "submit_proposal", "get_parameter_contract", "validate_parameter_values", "preview_parameter_changes", "apply_parameter_changes"]
+__all__ = ["preview_proposal", "solve_sketch", "submit_proposal", "get_parameter_contract", "validate_parameter_values", "preview_parameter_changes", "apply_parameter_changes", "preview_sketch", "apply_sketch", "search_materials", "preview_material", "apply_material"]
