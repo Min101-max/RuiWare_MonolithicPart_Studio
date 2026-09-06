@@ -1435,13 +1435,75 @@ code {
 .semantic-face-contract { margin-top: 12px; }
 .semantic-face-row {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 24px;
-  align-items: end;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  grid-template-areas:
+    "identity delete"
+    "bounds delete";
+  align-items: start;
+  column-gap: 12px;
+  row-gap: 8px;
   border-top: 1px solid #edf0f2;
-  padding: 9px 0;
+  padding: 10px 0;
+}
+.semantic-face-identity {
+  grid-area: identity;
+  display: grid;
+  grid-template-columns:
+    minmax(120px, 1fr)
+    minmax(120px, 1fr)
+    minmax(180px, 1.4fr);
+  gap: 8px;
+}
+.semantic-face-bounds {
+  grid-area: bounds;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.semantic-axis-group {
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid #e0e5e8;
+  border-radius: 6px;
+}
+.semantic-axis-group legend {
+  grid-column: 1 / -1;
+  padding: 0 4px;
+  font-size: 8px;
+  font-weight: 700;
+  color: #53636c;
+}
+.semantic-face-row .field,
+.semantic-face-row .code-input {
+  min-width: 0;
+}
+.semantic-face-row .field {
+  margin-bottom: 0;
+}
+.semantic-face-row .code-input {
+  display: block;
+}
+.semantic-face-row input,
+.semantic-face-row select,
+.semantic-face-row .code-input input {
+  min-width: 0;
+  width: 100%;
+  font-size: 8px;
+}
+.semantic-face-row input,
+.semantic-face-row select {
+  padding: 6px 7px;
 }
 .semantic-face-row .delete-icon { border: 0; background: transparent; color: #8e99a1; }
+.semantic-face-row .delete-icon {
+  grid-area: delete;
+  align-self: start;
+  justify-self: center;
+}
 .host-frame strong,
 .host-frame small {
   display: block;
@@ -1564,10 +1626,14 @@ code {
     grid-template-columns: 1fr;
   }
   .face-binding-list { grid-column: auto; }
-  .semantic-face-row { grid-template-columns: 1fr; }
+  .semantic-face-identity { grid-template-columns: 1fr; }
+  .semantic-face-bounds { grid-template-columns: 1fr; }
   .dimension-row { grid-template-columns: 1fr; }
   .rule-local-preview { grid-template-columns: 1fr; }
   .placement-value-row { grid-template-columns: 1fr; }
+}
+@media (max-width: 460px) {
+  .semantic-axis-group { grid-template-columns: 1fr; }
 }
 .text-btn {
   border: 0;

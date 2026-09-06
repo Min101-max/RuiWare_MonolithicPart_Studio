@@ -342,81 +342,91 @@ export function GeometryRecipePanel({
           />
           {recipe.semanticFaces.map((face, index) => (
             <div className="semantic-face-row" key={`${face.id}-${index}`}>
-              <Field label="稳定 ID">
-                <input
-                  value={face.id}
-                  onChange={(e) => editSemanticFace(index, { id: e.target.value })}
-                />
-              </Field>
-              <Field label="显示名称">
-                <input
-                  value={face.label}
-                  onChange={(e) =>
-                    editSemanticFace(index, { label: e.target.value })
-                  }
-                />
-              </Field>
-              <Field label="局部坐标系">
-                <select
-                  value={face.hostFrame}
-                  onChange={(e) =>
-                    editSemanticFace(index, {
-                      hostFrame: e.target.value as GeometryRecipe["semanticFaces"][number]["hostFrame"],
-                    })
-                  }
-                >
-                  <option value="negativeY">−Y（U=X，V=Z）</option>
-                  <option value="positiveY">+Y（U=X，V=Z）</option>
-                  <option value="negativeX">−X（U=Y，V=Z）</option>
-                  <option value="positiveX">+X（U=Y，V=Z）</option>
-                  <option value="negativeZ">−Z（U=X，V=Y）</option>
-                  <option value="positiveZ">+Z（U=X，V=Y）</option>
-                </select>
-              </Field>
-              <Field label="U 起始边界">
-                <code className="code-input">
+              <div className="semantic-face-identity">
+                <Field label="稳定 ID">
                   <input
-                    list="feature-parameter-options"
-                    value={face.uStartExpression}
+                    value={face.id}
+                    onChange={(e) => editSemanticFace(index, { id: e.target.value })}
+                  />
+                </Field>
+                <Field label="显示名称">
+                  <input
+                    value={face.label}
                     onChange={(e) =>
-                      editSemanticFace(index, { uStartExpression: e.target.value })
+                      editSemanticFace(index, { label: e.target.value })
                     }
                   />
-                </code>
-              </Field>
-              <Field label="U 跨度">
-                <code className="code-input">
-                  <input
-                    list="feature-parameter-options"
-                    value={face.uSpanExpression}
+                </Field>
+                <Field label="局部坐标系">
+                  <select
+                    value={face.hostFrame}
                     onChange={(e) =>
-                      editSemanticFace(index, { uSpanExpression: e.target.value })
+                      editSemanticFace(index, {
+                        hostFrame: e.target.value as GeometryRecipe["semanticFaces"][number]["hostFrame"],
+                      })
                     }
-                  />
-                </code>
-              </Field>
-              <Field label="V 起始边界">
-                <code className="code-input">
-                  <input
-                    list="feature-parameter-options"
-                    value={face.vStartExpression}
-                    onChange={(e) =>
-                      editSemanticFace(index, { vStartExpression: e.target.value })
-                    }
-                  />
-                </code>
-              </Field>
-              <Field label="V 跨度">
-                <code className="code-input">
-                  <input
-                    list="feature-parameter-options"
-                    value={face.vSpanExpression}
-                    onChange={(e) =>
-                      editSemanticFace(index, { vSpanExpression: e.target.value })
-                    }
-                  />
-                </code>
-              </Field>
+                  >
+                    <option value="negativeY">−Y（U=X，V=Z）</option>
+                    <option value="positiveY">+Y（U=X，V=Z）</option>
+                    <option value="negativeX">−X（U=Y，V=Z）</option>
+                    <option value="positiveX">+X（U=Y，V=Z）</option>
+                    <option value="negativeZ">−Z（U=X，V=Y）</option>
+                    <option value="positiveZ">+Z（U=X，V=Y）</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="semantic-face-bounds">
+                <fieldset className="semantic-axis-group">
+                  <legend>U 方向</legend>
+                  <Field label="U 起始边界">
+                    <code className="code-input">
+                      <input
+                        list="feature-parameter-options"
+                        value={face.uStartExpression}
+                        onChange={(e) =>
+                          editSemanticFace(index, { uStartExpression: e.target.value })
+                        }
+                      />
+                    </code>
+                  </Field>
+                  <Field label="U 跨度">
+                    <code className="code-input">
+                      <input
+                        list="feature-parameter-options"
+                        value={face.uSpanExpression}
+                        onChange={(e) =>
+                          editSemanticFace(index, { uSpanExpression: e.target.value })
+                        }
+                      />
+                    </code>
+                  </Field>
+                </fieldset>
+                <fieldset className="semantic-axis-group">
+                  <legend>V 方向</legend>
+                  <Field label="V 起始边界">
+                    <code className="code-input">
+                      <input
+                        list="feature-parameter-options"
+                        value={face.vStartExpression}
+                        onChange={(e) =>
+                          editSemanticFace(index, { vStartExpression: e.target.value })
+                        }
+                      />
+                    </code>
+                  </Field>
+                  <Field label="V 跨度">
+                    <code className="code-input">
+                      <input
+                        list="feature-parameter-options"
+                        value={face.vSpanExpression}
+                        onChange={(e) =>
+                          editSemanticFace(index, { vSpanExpression: e.target.value })
+                        }
+                      />
+                    </code>
+                  </Field>
+                </fieldset>
+              </div>
               <button
                 className="delete-icon"
                 title="删除语义面"
