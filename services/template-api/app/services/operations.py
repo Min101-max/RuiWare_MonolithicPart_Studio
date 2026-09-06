@@ -19,7 +19,9 @@ from .draft import (
     validate_template_stage,
 )
 from .material import create_material_binding, material_sources, resolve_material_binding, search_materials
+from .material_assistance import apply_material_binding, preview_material_binding
 from .parameters import apply_parameter_changes, parameter_contract, preview_parameter_changes, validate_parameter_values
+from .sketch import apply_sketch_edit, preview_sketch_edit
 from .workspace import get_current_draft, set_current_draft
 from .workflow import (
     compile_preview,

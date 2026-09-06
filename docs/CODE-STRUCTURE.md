@@ -208,6 +208,7 @@
 - `read/validation.py`：读取指定模板阶段的确定性校验结果；不修改数据。
 - `authoring/__init__.py`：编辑和提案工具的统一导出入口。
 - `authoring/sketch.py`：调用草图确定性求解接口，不保存草稿。
+- `authoring/phase3.py`：调用草图编辑、材料搜索和材料绑定的预览/确认接口。
 - `authoring/proposals.py`：调用提案预览和提案提交接口；提交操作会产生新修订。
 - `authoring/parameters.py`：调用参数契约读取、批量校验、修改预览和确认写入接口；写入工具要求 `baseRevision` 和显式确认。
 - `workflow/__init__.py`：CAD、规则试算和阶段推进工具的统一导出入口。
@@ -304,10 +305,10 @@ Repository + 领域模型 + 阶段校验
 
 以下内容是后续完善重点，不改变 GUI 主线的业务入口：
 
-1. **草图和材料业务工具**
-   - 增加草图图元、约束、闭合关系和尺寸的预览式编辑能力。
-   - 增加材料搜索、材料匹配、材料绑定预览和确认提交能力。
-   - 材料变化后重新计算壁厚并触发相关几何校验。
+1. **草图和材料业务工具**（第三阶段已完成）
+   - `POST /template-drafts/{draftId}/sketch/preview|apply` 支持图元、约束、区域和草图设置的预览式编辑；写入要求 `baseRevision` 与 `confirmed=true`，保存前运行确定性求解和几何阶段校验。
+   - `POST /template-drafts/{draftId}/material-binding/preview|apply` 支持材料匹配、reference/copy 绑定预览和确认提交；绑定后同步材料厚度参数，重新运行材料与几何校验。
+   - MCP 工具 `ruiware_search_materials`、`ruiware_preview_sketch_edit`、`ruiware_apply_sketch_edit`、`ruiware_preview_material_binding` 和 `ruiware_apply_material_binding` 暴露同一能力，沿用版本冲突和统一错误协议。
 
 2. **面向目标的业务动作编排**
    - 在底层工具之上增加“检查当前阶段”“修复当前错误”“准备 CAD 编译”等组合动作。
