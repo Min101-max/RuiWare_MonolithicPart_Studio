@@ -5,6 +5,11 @@ from __future__ import annotations
 
 ADDITIONAL_TOOLS = [
     {
+        "name": "create_template",
+        "description": "按名称幂等创建空白模板并将其选为 GUI 当前零部件。",
+        "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+    },
+    {
         "name": "ruiware_get_current_draft_status",
         "description": "读取 GUI 当前选中的零部件工程状态，包括阶段校验、最近编译和发布版本；未选中时不会按更新时间猜测。",
         "inputSchema": {"type": "object", "properties": {}},
@@ -79,4 +84,7 @@ ADDITIONAL_TOOLS = [
     {"name": "ruiware_preview_material_binding", "description": "预览材料匹配、绑定方式和壁厚参数影响；不保存修改。", "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "sourceRecordId"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer"}, "sourceRecordId": {"type": "string"}, "mode": {"enum": ["reference", "copy"]}, "role": {"enum": ["minimum", "nominal", "maximum", "special"]}}}},
     {"name": "ruiware_apply_material_binding", "description": "在用户确认且修订未变化时绑定材料，更新壁厚参数并重新校验几何。", "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "sourceRecordId", "confirmed"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer"}, "sourceRecordId": {"type": "string"}, "mode": {"enum": ["reference", "copy"]}, "role": {"enum": ["minimum", "nominal", "maximum", "special"]}, "confirmed": {"type": "boolean"}}}},
     {"name": "ruiware_search_materials", "description": "按关键词和材料要求查询并匹配材料库记录；不修改平台数据。", "inputSchema": {"type": "object", "properties": {"search": {"type": "string"}, "limit": {"type": "integer"}, "requirement": {"type": "object"}}}},
+    {"name": "ruiware_plan_task", "description": "根据目标生成当前模板的可执行任务计划；不修改平台数据。", "inputSchema": {"type": "object", "required": ["draftId", "task"], "properties": {"draftId": {"type": "string"}, "task": {"enum": ["completeCurrentStage", "fixCurrentErrors", "prepareCadCompile", "checkPublishReadiness"]}}}},
+    {"name": "ruiware_execute_task", "description": "执行已预览并确认的目标任务；要求 baseRevision 和 confirmed=true。修复任务通过 input 指定参数、草图或材料修复。", "inputSchema": {"type": "object", "required": ["draftId", "task", "baseRevision", "confirmed"], "properties": {"draftId": {"type": "string"}, "task": {"enum": ["completeCurrentStage", "fixCurrentErrors", "prepareCadCompile", "checkPublishReadiness"]}, "baseRevision": {"type": "integer"}, "confirmed": {"type": "boolean"}, "input": {"type": "object"}}}},
+    {"name": "ruiware_publish_template", "description": "发布已通过准入校验和 CAD 编译的模板；仅在用户明确确认后调用。", "inputSchema": {"type": "object", "required": ["draftId"], "properties": {"draftId": {"type": "string"}}}},
 ]

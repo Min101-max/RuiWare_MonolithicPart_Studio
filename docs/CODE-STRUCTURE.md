@@ -146,9 +146,12 @@
 - `app/services/context.py`：上下文汇总与查询。
 - `app/services/draft.py`：草稿生命周期操作。
 - `app/services/material.py`：材料绑定、解析和查询。
+- `app/services/material_assistance.py`：材料匹配预览、确认绑定、壁厚参数同步和几何复核。
+- `app/services/orchestration.py`：第四阶段目标任务计划与执行，组合阶段校验、参数/草图/材料修复及 CAD 编译。
 - `app/services/parameters.py`：参数契约读取、批量值校验、参数修改预览、下游阶段复核和确认写入。
 - `app/services/operations.py`：对外业务操作总入口。
 - `app/services/proposal.py`：提案预览与应用。
+- `app/services/sketch.py`：草图图元、约束、区域修改的预览、确认写入和确定性求解。
 - `app/services/workflow.py`：阶段流转与阶段校验。
 
 参数辅助 REST 接口集中在 `app/main.py`：
@@ -157,6 +160,11 @@
 - `POST /api/v1/template-drafts/{draftId}/parameters/validate`：校验参数类型、单位、范围并运行规则求值。
 - `POST /api/v1/template-drafts/{draftId}/parameters/preview`：基于 `baseRevision` 预览参数变化和下游阶段校验。
 - `POST /api/v1/template-drafts/{draftId}/parameters/apply`：仅在 `confirmed=true` 且修订未变化时写入新修订。
+
+目标任务编排 REST 接口也集中在 `app/main.py`：
+
+- `POST /api/v1/template-drafts/{draftId}/assistant/tasks/plan`：读取当前阶段、失败校验和编译状态，生成结构化执行计划，不修改草稿。
+- `POST /api/v1/template-drafts/{draftId}/assistant/tasks/execute`：按任务执行阶段完成、参数/草图/材料修复、CAD 编译或发布准入检查；写操作要求当前 `baseRevision` 和显式确认。
 
 ## 4. 领域层 `libs/python/template_core`
 
@@ -215,6 +223,8 @@
 - `workflow/compile.py`：调用 CAD 编译、读取最近编译、提取 B-Rep 摘要和导出产物地址。
 - `workflow/evaluation.py`：调用模板规则试算接口，不保存草稿。
 - `workflow/stages.py`：调用阶段完成接口，由 API 再次校验通过后更新阶段状态。
+- `workflow/tasks.py`：调用目标任务计划和执行接口，透传 `baseRevision`、确认状态及具体修复输入。
+- `workflow/publish.py`：在发布准入通过后调用模板发布接口。
 - `guidance/__init__.py`：Agent 指引工具的统一导出入口。
 - `guidance/parameter_help.py`：从当前草稿读取参数契约和变体覆盖，帮助 Agent 补全输入。
 - `guidance/next_actions.py`：根据阶段状态和校验结果给出下一步工具建议，不擅自修改数据。
@@ -235,7 +245,7 @@ core/protocol.py
         ↓
 McpApplication.call_tool()
         ↓
-tools/read/*
+tools/read/*、tools/authoring/*、tools/workflow/*
         ↓
 api_client.py
         ↓ HTTP
@@ -244,13 +254,31 @@ services/template-api
 业务服务 / Repository / 领域层
 ```
 
+### 6.5 第四阶段任务流
+
+```text
+用户业务目标
+        ↓
+ruiware_plan_task
+        ↓
+当前阶段 + 阻塞校验 + 可执行步骤
+        ↓ 用户确认并提供必要工程输入
+ruiware_execute_task（baseRevision）
+        ↓
+阶段完成 / 参数修复 / 草图修复 / 材料绑定 / CAD 编译 / 发布检查
+        ↓
+新修订或只读检查结果 + GUI 自动同步
+```
+
+第四阶段回归测试位于 `tests/test_orchestration.py`；MCP 路由和契约回归继续由 `tests/test_ruiware_mcp.py` 覆盖。
+
 当前已经完成 MCP 接口冻结、核心协议拆分、只读工具拆分，以及编辑提案、CAD 工作流和 Agent 指引工具接入。`resources` 目录仍作为后续工具目录、阶段指南和参数 Schema 资源的扩展位置。
 
 参数辅助对应四个 MCP 工具：`ruiware_get_parameter_contract`、`ruiware_validate_parameter_values`、`ruiware_preview_parameter_changes` 和 `ruiware_apply_parameter_changes`。前三者不写入模板，最后一个必须携带 `baseRevision` 和 `confirmed=true`，成功后生成新修订并由 GUI 状态同步轮询刷新。
 
 GUI 切换零部件时调用 `/api/v1/workspace/current-draft` 保存 `draftId`；MCP 工具 `ruiware_get_current_draft_status` 读取同一工作区选择，因此 Agent 返回的工程状态与 GUI 当前选中项保持一致。
 
-### 6.5 Agent 辅助线现状
+### 6.6 Agent 辅助线现状
 
 当前项目采用“GUI-first、Agent 辅助”的双线结构：GUI 负责主要编辑流程和人工确认，Agent 通过 MCP 读取上下文、分析问题、生成建议，并在用户确认后调用写入工具。Agent 不直接操作数据库，也不绕过模板 API 和领域校验。
 
@@ -291,7 +319,7 @@ Repository + 领域模型 + 阶段校验
 新修订 / 编译结果 / GUI 刷新
 ```
 
-### 6.6 已完成的 Agent 辅助闭环
+### 6.7 已完成的 Agent 辅助闭环
 
 第一阶段“状态同步”和第二阶段“参数辅助”已经落地：
 
@@ -301,17 +329,18 @@ Repository + 领域模型 + 阶段校验
 4. 参数辅助写入要求 `baseRevision` 和用户确认；服务端拒绝过期修订，避免静默覆盖。
 5. 参数写入后重新执行受影响阶段校验，GUI 将新修订纳入后续审查和编译流程。
 
-### 6.7 Agent 辅助线尚待完善的部分
+### 6.8 Agent 辅助线尚待完善的部分
 
-以下内容是后续完善重点，不改变 GUI 主线的业务入口：
+以下按已完成能力和后续完善重点整理，不改变 GUI 主线的业务入口：
 
 1. **草图和材料业务工具**（第三阶段已完成）
    - `POST /template-drafts/{draftId}/sketch/preview|apply` 支持图元、约束、区域和草图设置的预览式编辑；写入要求 `baseRevision` 与 `confirmed=true`，保存前运行确定性求解和几何阶段校验。
    - `POST /template-drafts/{draftId}/material-binding/preview|apply` 支持材料匹配、reference/copy 绑定预览和确认提交；绑定后同步材料厚度参数，重新运行材料与几何校验。
    - MCP 工具 `ruiware_search_materials`、`ruiware_preview_sketch_edit`、`ruiware_apply_sketch_edit`、`ruiware_preview_material_binding` 和 `ruiware_apply_material_binding` 暴露同一能力，沿用版本冲突和统一错误协议。
 
-2. **面向目标的业务动作编排**
-   - 在底层工具之上增加“检查当前阶段”“修复当前错误”“准备 CAD 编译”等组合动作。
+2. **面向目标的业务动作编排**（第四阶段已完成）
+   - `POST /template-drafts/{draftId}/assistant/tasks/plan|execute` 提供“完成当前阶段”“修复当前错误”“准备 CAD 编译”“检查是否可以发布”四类目标任务；计划阶段只读取状态和校验，执行阶段要求 `baseRevision`，写入任务要求 `confirmed=true`。
+   - MCP 工具 `ruiware_plan_task` 和 `ruiware_execute_task` 暴露同一编排入口；修复任务可分派到参数、草图或材料辅助服务，缺少具体工程输入时返回阻塞项和下一步工具，不猜测用户输入。
    - `get_next_actions` 返回可直接执行的工具名和完整参数，而不仅是文字建议。
    - Agent 可以按照阶段依赖自动组织读取、预览、确认、提交和验证流程。
 
@@ -325,7 +354,51 @@ Repository + 领域模型 + 阶段校验
    - 在 `ruiware_mcp/resources` 中补充阶段指南、参数 Schema 和工具使用说明。
    - 增加 MCP 契约、GUI 刷新、并发修改、参数越界、草图退化和 CAD 失败恢复测试。
 
-因此，当前 MCP 线已经完成“读取 → 分析 → 建议 → 预览 → 确认 → 写入 → 校验 → GUI 自动同步”的参数辅助闭环；后续重点转向草图/材料业务工具、目标导向任务编排以及统一审计和稳定性测试。
+因此，当前 MCP 线已经完成“读取 → 分析 → 建议 → 预览 → 确认 → 写入 → 校验 → GUI 自动同步”的参数、草图、材料与业务编排闭环；后续重点转向统一审计、并发控制和稳定性测试。
+
+### 6.9 MCP 模板创建闭环
+
+新增后端路由 `POST /api/v1/template-drafts/create`，请求至少包含 `name`，内部复用空白模板默认值、名称规范化和领域模型校验。该路由不改变既有 `/template-drafts/blank`、完整创建接口或页面数据结构。
+
+MCP 工具 `create_template` 在现有注册处暴露：先调用命名创建路由，再调用 `/api/v1/workspace/current-draft` 将创建或复用的草稿设为 GUI 当前零部件。GUI 继续使用现有工作区读取和轮询逻辑，因此无需改变当前页面即可显示 Agent 创建的模板。
+
+当活动草稿已存在相同规范化名称时，接口返回原草稿（`created=false`、`idempotent=true`），不创建第二条记录，也不增加 revision；首次创建返回 `created=true`。相关验证位于 `tests/test_template_creation_api.py` 和 `tests/test_create_template_mcp.py`，并由 MCP 契约测试确保工具列表及参数兼容。
+
+### 6.10 GUI 与 Agent 安全边界
+
+当前安全边界遵循“GUI 负责交互，后端负责裁决，领域层负责规则，Agent 通过 MCP 调用业务能力”的原则：
+
+```text
+GUI / Agent
+    ↓
+模板 API
+    ↓
+业务服务
+    ↓
+Repository
+    ↓
+领域模型、参数规则、阶段校验和 CAD 执行器
+```
+
+当前已经具备的安全能力：
+
+- GUI 和 Agent 都不能直接绕过模板 API 操作数据库，草稿统一通过 `Repository` 保存。
+- 阶段完成、参数契约、草图、材料、CAD 编译和发布均由后端及领域层再次校验，前端校验不是最终安全边界。
+- MCP 工具按只读、预览和写入能力组织；草图求解、规则试算和状态读取默认不保存草稿。
+- 提案和参数写入支持预览、用户确认和 `baseRevision`，版本过期时返回 `DRAFT_REVISION_CONFLICT`，避免旧数据静默覆盖新数据。
+- GUI 通过当前 `draftId` 和 `revision` 感知 Agent 修改；无本地编辑时自动同步，有本地编辑时保留本地内容并提示冲突。
+- 统一错误响应包含错误码、处理建议、字段、追踪标识和 `retryable`，便于 GUI 和 Agent 判断是否可以重试。
+
+当前安全等级适用于本机单用户开发和受控演示环境；多人协作或公网部署前仍需完善：
+
+1. 将 `baseRevision` 校验统一覆盖所有写操作，包括材料绑定、阶段完成、编译和发布。
+2. 将用户确认从工具说明升级为服务端确认凭证，提交时同时校验提案摘要、草稿版本和确认令牌。
+3. 将全局 `workspace_context` 升级为按用户、会话或工作区隔离，避免不同用户共享当前零部件选择。
+4. 增加 GUI、Agent、用户和工具维度的身份授权，区分查询、编辑、CAD 执行和发布审批权限。
+5. 完善 Agent 操作审计，记录操作者来源、会话、工具、修改前后版本、变更差异、确认信息和执行结果。
+6. 增加 GUI 自动刷新、并发修改、版本冲突、参数越界、草图退化、CAD 失败恢复和 MCP 断线重试测试。
+
+因此，当前架构的安全结论是：本机单用户场景基本可用；多人协作需要补齐会话隔离、统一并发控制和权限；公网生产部署前还需要认证、授权、审计和更严格的确认机制。
 
 ## 7. 现有文档
 

@@ -16,6 +16,7 @@ SERVER_INFO = {
 
 
 TOOL_CONTRACTS = {
+    "create_template": {"required": ("name",), "read_only": False},
     "ruiware_get_draft_context": {
         "required": ("draftId",),
         "read_only": True,
@@ -59,4 +60,7 @@ TOOL_CONTRACTS = {
     "ruiware_preview_material_binding": {"required": ("draftId", "baseRevision", "sourceRecordId"), "read_only": True},
     "ruiware_apply_material_binding": {"required": ("draftId", "baseRevision", "sourceRecordId", "confirmed"), "read_only": False},
     "ruiware_search_materials": {"required": (), "read_only": True},
+    "ruiware_plan_task": {"required": ("draftId", "task"), "read_only": True},
+    "ruiware_execute_task": {"required": ("draftId", "task", "baseRevision", "confirmed"), "read_only": False},
+    "ruiware_publish_template": {"required": ("draftId",), "read_only": False},
 }

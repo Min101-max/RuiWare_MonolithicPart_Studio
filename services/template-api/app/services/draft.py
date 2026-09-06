@@ -20,6 +20,15 @@ def create_blank_template_draft(repository: Repository, name: str) -> TemplateDr
     return repository.save_draft(draft, reason="create")
 
 
+def create_named_template_draft(repository: Repository, name: str) -> tuple[TemplateDraft, bool]:
+    """Create a blank draft by name, reusing an active draft for idempotency."""
+    normalized_name = name.strip() or "未命名零部件模板"
+    for existing in repository.list_drafts():
+        if existing.name == normalized_name:
+            return existing, False
+    return create_blank_template_draft(repository, normalized_name), True
+
+
 def create_template_draft(repository: Repository, draft: TemplateDraft) -> TemplateDraft:
     if draft.id and repository.get_draft_optional(draft.id, include_archived=True):
         raise api_error("DRAFT_ID_DUPLICATE", status_code=409, context={"draftId": draft.id})

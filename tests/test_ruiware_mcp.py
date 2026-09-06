@@ -58,6 +58,15 @@ def test_parameter_assistance_tools_use_preview_then_confirmed_apply():
     assert app.client.calls[-1][2]["confirmed"] is True
 
 
+def test_business_task_tools_use_plan_then_confirmed_execute():
+    app = McpApplication(FakeClient())
+    app.call_tool("ruiware_plan_task", {"draftId": "draft-1", "task": "fixCurrentErrors"})
+    assert app.client.calls[-1] == ("POST", "/template-drafts/draft-1/assistant/tasks/plan", {"task": "fixCurrentErrors"})
+    task_input = {"kind": "parameterChanges", "changes": [{"parameterId": "length", "value": 1200}]}
+    app.call_tool("ruiware_execute_task", {"draftId": "draft-1", "task": "fixCurrentErrors", "baseRevision": 3, "confirmed": True, "input": task_input})
+    assert app.client.calls[-1] == ("POST", "/template-drafts/draft-1/assistant/tasks/execute", {"task": "fixCurrentErrors", "baseRevision": 3, "confirmed": True, "input": task_input})
+
+
 def test_context_attachment_and_validation_tools_are_read_only():
     client = FakeClient()
     app = McpApplication(client)
