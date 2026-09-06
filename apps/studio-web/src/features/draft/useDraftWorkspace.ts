@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, api } from "../../api";
+import { api, ApiError, toErrorNotice, type ErrorNotice } from "../../api";
 import { STAGES } from "../workflow/stageConfig";
 import type {
   CompileResult,
@@ -12,34 +12,20 @@ import type {
   TemplateAuthoringRegistry,
 } from "../../types";
 
-/** 前端统一展示的错误信息，避免页面组件直接解析 HTTP 响应。 */
-export type ErrorNotice = {
-  code: string;
-  message: string;
-  action?: string | null;
-  fields: { path?: string; message: string; type?: string }[];
-  traceId?: string;
-};
-
 export function preservePreviousCompileArtifacts(previous: CompileResult | null, failed: CompileResult): CompileResult {
   return previous ? { ...failed, artifacts: previous.artifacts, metrics: previous.metrics } : failed;
 }
 
-/** 将 API、浏览器和未知异常转换成统一的页面提示结构。 */
-function toErrorNotice(error: unknown): ErrorNotice {
-  if (error instanceof ApiError) {
-    return {
-      code: error.code,
-      message: error.message,
-      action: error.action,
-      fields: error.fields,
-      traceId: error.traceId,
-    };
-  }
-  if (error instanceof Error) {
-    return { code: "CLIENT_ERROR", message: error.message, fields: [] };
-  }
-  return { code: "CLIENT_ERROR", message: String(error), fields: [] };
+export const DRAFT_SYNC_INTERVAL_MS = 3000;
+
+export type DraftSyncConflict = {
+  localRevision: number;
+  remoteRevision: number;
+  remoteDraft: Draft;
+};
+
+export function remoteDraftNeedsSync(local: Draft | null, remote: Draft): boolean {
+  return !!local?.id && local.id === remote.id && remote.revision > local.revision;
 }
 
 /**
@@ -50,8 +36,13 @@ function toErrorNotice(error: unknown): ErrorNotice {
  */
 export function useDraftWorkspace() {
   const initialized = useRef(false);
+  const currentDraftSyncRef = useRef(Promise.resolve());
   const errorTimerRef = useRef<number | null>(null);
   const noticeTimerRef = useRef<number | null>(null);
+  const draftRef = useRef<Draft | null>(null);
+  const dirtyRef = useRef(false);
+  const compileRef = useRef<CompileResult | null>(null);
+  const conflictRevisionRef = useRef<number | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [stage, setStage] = useState<StageName>("templateInfo");
@@ -67,6 +58,15 @@ export function useDraftWorkspace() {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState<ErrorNotice | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<ErrorNotice | null>(null);
+  const [syncConflict, setSyncConflict] = useState<DraftSyncConflict | null>(null);
+
+  useEffect(() => {
+    draftRef.current = draft;
+    dirtyRef.current = dirty;
+    compileRef.current = compile;
+  }, [draft, dirty, compile]);
 
   function showError(errorValue: unknown) {
     setError(toErrorNotice(errorValue));
@@ -79,6 +79,8 @@ export function useDraftWorkspace() {
 
   function chooseDraft(item: Draft) {
     setDraft(structuredClone(item));
+    setSyncConflict(null);
+    conflictRevisionRef.current = null;
     setDirty(false);
     setValidation(null);
     setCompile(null);
@@ -88,23 +90,87 @@ export function useDraftWorkspace() {
     const next = STAGES.find((itemStage) => item.stageStatus[itemStage.id] !== "complete");
     setStage(next?.id || "variants");
     if (item.id) {
+      currentDraftSyncRef.current = currentDraftSyncRef.current
+        .catch(() => undefined)
+        .then(() => api.setCurrentDraft(item.id!))
+        .then(() => undefined)
+        .catch(showError);
       void api.latestCompile(item.id).then(setCompile).catch(showError);
       void api.versions(item.id).then(setVersions).catch(showError);
     }
   }
 
   async function loadDrafts(selectId?: string) {
+    setLoading(true);
+    setLoadError(null);
     try {
       const rows = await api.drafts();
+      let currentDraftId: string | null = null;
+      try {
+        currentDraftId = (await api.currentDraft()).draftId;
+      } catch {
+        // 工作区状态接口不可用时，仍然使用草稿列表恢复工作台。
+      }
       setDrafts(rows);
       const selected =
         rows.find((item) => item.id === selectId) ||
+        rows.find((item) => item.id === currentDraftId) ||
         rows[0] ||
         (await api.createBlank("Ω型立柱模板"));
       if (!rows.length) setDrafts([selected]);
       chooseDraft(selected);
     } catch (errorValue) {
-      showError(errorValue);
+      const nextError = toErrorNotice(errorValue);
+      setLoadError(nextError);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function showNotice(message: string, duration = 2400) {
+    setNotice(message);
+    if (noticeTimerRef.current != null) window.clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = window.setTimeout(() => {
+      setNotice("");
+      noticeTimerRef.current = null;
+    }, duration);
+  }
+
+  function registerSyncConflict(remoteDraft: Draft) {
+    const localDraft = draftRef.current;
+    if (!localDraft || !remoteDraftNeedsSync(localDraft, remoteDraft)) return;
+    if (conflictRevisionRef.current === remoteDraft.revision) return;
+    conflictRevisionRef.current = remoteDraft.revision;
+    setSyncConflict({
+      localRevision: localDraft.revision,
+      remoteRevision: remoteDraft.revision,
+      remoteDraft: structuredClone(remoteDraft),
+    });
+    showNotice("Agent 已修改，请查看变更", 6000);
+  }
+
+  function applyRemoteDraft(remoteDraft: Draft) {
+    setDraft(structuredClone(remoteDraft));
+    setDrafts((items) => items.map((item) => (item.id === remoteDraft.id ? remoteDraft : item)));
+    setDirty(false);
+    setSyncConflict(null);
+    conflictRevisionRef.current = null;
+    setValidation(null);
+    setCompileStale(!!compileRef.current);
+    showNotice(`已同步 Agent 修改（R${remoteDraft.revision}）`);
+  }
+
+  async function syncCurrentDraft() {
+    const localDraft = draftRef.current;
+    if (!localDraft?.id) return;
+    try {
+      const remoteDraft = await api.draft(localDraft.id);
+      if (!remoteDraftNeedsSync(localDraft, remoteDraft)) return;
+      setDrafts((items) => items.map((item) => (item.id === remoteDraft.id ? remoteDraft : item)));
+      if (dirtyRef.current) registerSyncConflict(remoteDraft);
+      else applyRemoteDraft(remoteDraft);
+    } catch (errorValue) {
+      // A transient polling failure must not interrupt editing; the next tick retries.
     }
   }
 
@@ -134,6 +200,13 @@ export function useDraftWorkspace() {
   }, [stage, draft?.id]);
 
   useEffect(() => {
+    if (!draft?.id) return;
+    void syncCurrentDraft();
+    const timer = window.setInterval(() => void syncCurrentDraft(), DRAFT_SYNC_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [draft?.id]);
+
+  useEffect(() => {
     if (stage !== "material" || !draft?.materialRequirements[0]) return;
     const timer = window.setTimeout(() => {
       void api
@@ -159,6 +232,22 @@ export function useDraftWorkspace() {
     if (compile) setCompileStale(true);
   }
 
+  function adoptSavedDraft(saved: Draft) {
+    setDraft(structuredClone(saved));
+    setDrafts((items) => items.map((item) => (item.id === saved.id ? saved : item)));
+    setDirty(false);
+    setValidation(null);
+    setSyncConflict(null);
+    conflictRevisionRef.current = null;
+    if (compileRef.current) setCompileStale(true);
+  }
+
+  function resolveSyncConflict(action: "reload" | "dismiss") {
+    if (!syncConflict) return;
+    if (action === "reload") applyRemoteDraft(syncConflict.remoteDraft);
+    else setSyncConflict(null);
+  }
+
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
     if (draft) change({ ...draft, [key]: value });
   }
@@ -171,15 +260,20 @@ export function useDraftWorkspace() {
       setDraft(saved);
       setDrafts((items) => items.map((item) => (item.id === saved.id ? saved : item)));
       setDirty(false);
-      setNotice("已保存为新修订");
-      if (noticeTimerRef.current != null)
-        window.clearTimeout(noticeTimerRef.current);
-      noticeTimerRef.current = window.setTimeout(() => {
-        setNotice("");
-        noticeTimerRef.current = null;
-      }, 2400);
+      setSyncConflict(null);
+      conflictRevisionRef.current = null;
+      showNotice("已保存为新修订");
       return saved;
     } catch (errorValue) {
+      if (errorValue instanceof ApiError && errorValue.code === "DRAFT_REVISION_CONFLICT") {
+        try {
+          const remoteDraft = await api.draft(current.id);
+          conflictRevisionRef.current = null;
+          registerSyncConflict(remoteDraft);
+        } catch {
+          // Preserve the original structured conflict error when the refresh also fails.
+        }
+      }
       showError(errorValue);
       return null;
     } finally {
@@ -214,13 +308,7 @@ export function useDraftWorkspace() {
       if (result.validation.complete) {
         const index = STAGES.findIndex((item) => item.id === stage);
         if (index < STAGES.length - 1) setStage(STAGES[index + 1].id);
-        setNotice("阶段检查通过");
-        if (noticeTimerRef.current != null)
-          window.clearTimeout(noticeTimerRef.current);
-        noticeTimerRef.current = window.setTimeout(() => {
-          setNotice("");
-          noticeTimerRef.current = null;
-        }, 2600);
+        showNotice("阶段检查通过", 2600);
       }
     } catch (errorValue) {
       showError(errorValue);
@@ -357,6 +445,8 @@ export function useDraftWorkspace() {
   return {
     drafts,
     draft,
+    loading,
+    loadError,
     stage,
     validation,
     compile,
@@ -375,8 +465,11 @@ export function useDraftWorkspace() {
     setMaterialSearch,
     setError,
     setNotice,
+    syncConflict,
+    resolveSyncConflict,
     chooseDraft,
     change,
+    adoptSavedDraft,
     update,
     save,
     check,
@@ -388,5 +481,6 @@ export function useDraftWorkspace() {
     runCompile,
     publish,
     showError,
+    reload: loadDrafts,
   };
 }

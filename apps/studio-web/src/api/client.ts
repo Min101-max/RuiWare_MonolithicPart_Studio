@@ -5,6 +5,10 @@ import type {
   Material,
   MaterialBinding,
   MaterialRequirement,
+  ParameterChange,
+  ParameterContract,
+  ParameterPreviewResult,
+  ParameterValidationResult,
   PublishedVersion,
   PublishResult,
   RevisionEntry,
@@ -23,7 +27,11 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     const payload = await response.json().catch(() => ({ detail: response.statusText }));
     const error = payload.error || payload.detail;
     if (error && typeof error === "object" && "code" in error && "message" in error) {
-      throw new ApiError(response.status, error as ApiErrorPayload);
+      throw new ApiError(response.status, {
+        fields: [],
+        ...error,
+        context: payload.context || error.context || {},
+      } as ApiErrorPayload);
     }
     const detail = typeof payload.detail === "string" ? payload.detail : response.statusText;
     throw new ApiError(response.status, {
@@ -31,6 +39,7 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
       message: detail || "请求处理失败",
       action: "请刷新页面后重试。",
       fields: [],
+      retryable: response.status >= 500,
     });
   }
   if (response.status === 204) return undefined as T;
@@ -46,6 +55,13 @@ const json = (method: string, body?: unknown): RequestInit => ({
 export const api = {
   templateAuthoringRegistry: () => request<TemplateAuthoringRegistry>("/api/v1/registries/template-authoring"),
   drafts: () => request<Draft[]>("/api/v1/template-drafts"),
+  draft: (id: string) => request<Draft>(`/api/v1/template-drafts/${id}`),
+  parameterContract: (id: string) => request<ParameterContract>(`/api/v1/template-drafts/${id}/parameters`),
+  validateParameterValues: (id: string, values: Record<string, string | number | boolean>, units: Record<string, string> = {}) => request<ParameterValidationResult>(`/api/v1/template-drafts/${id}/parameters/validate`, json("POST", { values, units })),
+  previewParameterChanges: (id: string, baseRevision: number, changes: ParameterChange[]) => request<ParameterPreviewResult>(`/api/v1/template-drafts/${id}/parameters/preview`, json("POST", { baseRevision, changes })),
+  applyParameterChanges: (id: string, baseRevision: number, changes: ParameterChange[], confirmed: boolean) => request<{ draft: Draft; changes: ParameterChange[]; downstreamValidations: Record<StageName, StageValidation> }>(`/api/v1/template-drafts/${id}/parameters/apply`, json("POST", { baseRevision, changes, confirmed })),
+  setCurrentDraft: (draftId: string) => request<{ draftId: string }>("/api/v1/workspace/current-draft", json("PUT", { draftId })),
+  currentDraft: () => request<{ draftId: string | null }>("/api/v1/workspace/current-draft"),
   createBlank: (name = "未命名零部件模板") => request<Draft>("/api/v1/template-drafts/blank", json("POST", { name })),
   saveDraft: (draft: Draft) => request<Draft>(`/api/v1/template-drafts/${draft.id}`, json("PUT", draft)),
   duplicateDraft: (id: string) => request<Draft>(`/api/v1/template-drafts/${id}/duplicate`, json("POST")),
@@ -71,4 +87,3 @@ export const api = {
 };
 
 export { ApiError };
-
