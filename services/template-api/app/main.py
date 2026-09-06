@@ -50,6 +50,7 @@ from .services.operations import (  # noqa: E402
     compile_template_draft as compile_template_draft_service,
     complete_template_stage as complete_template_stage_service,
     create_blank_template_draft as create_blank_template_draft_service,
+    create_named_template_draft as create_named_template_draft_service,
     create_material_binding as create_material_binding_service,
     create_template_draft as create_template_draft_service,
     duplicate_template_draft as duplicate_template_draft_service,
@@ -79,6 +80,8 @@ from .services.operations import (  # noqa: E402
     preview_material_binding as preview_material_binding_service,
     apply_sketch_edit as apply_sketch_edit_service,
     preview_sketch_edit as preview_sketch_edit_service,
+    execute_task as execute_task_service,
+    plan_task as plan_task_service,
     write_source_package as write_source_package_service,
     get_current_draft as get_current_draft_service,
     set_current_draft as set_current_draft_service,
@@ -92,6 +95,12 @@ class BindingRequest(BaseModel):
 
 class NewDraftRequest(BaseModel):
     name: str = "未命名零部件模板"
+
+
+class NamedDraftResponse(BaseModel):
+    draft: TemplateDraft
+    created: bool
+    idempotent: bool
 
 
 class CurrentDraftRequest(BaseModel):
@@ -162,6 +171,16 @@ class MaterialBindingAssistanceRequest(BaseModel):
     confirmed: bool = False
 
 
+class TaskPlanRequest(BaseModel):
+    task: Literal["completeCurrentStage", "fixCurrentErrors", "prepareCadCompile", "checkPublishReadiness"]
+
+
+class TaskExecuteRequest(TaskPlanRequest):
+    baseRevision: int
+    confirmed: bool = False
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
 material_library = RuiWareMaterialLibrary(MATERIAL_DATABASE)
 repository = Repository(LOCAL_DATABASE, material_library)
 
@@ -201,6 +220,16 @@ def preview_sketch_edit(draft_id: str, request: SketchEditRequest):
 @app.post("/api/v1/template-drafts/{draft_id}/sketch/apply")
 def apply_sketch_edit(draft_id: str, request: SketchEditRequest):
     return apply_sketch_edit_service(repository, draft_id, request.baseRevision, request.changes, request.confirmed)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/assistant/tasks/plan")
+def plan_assistant_task(draft_id: str, request: TaskPlanRequest):
+    return plan_task_service(repository, draft_id, request.task)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/assistant/tasks/execute")
+def execute_assistant_task(draft_id: str, request: TaskExecuteRequest):
+    return execute_task_service(repository, draft_id, request.task, request.baseRevision, request.confirmed, request.input)
 
 
 def _now() -> str:
@@ -283,6 +312,12 @@ def resolve_material_binding(binding_id: str):
 @app.post("/api/v1/template-drafts/blank", response_model=TemplateDraft, status_code=201)
 def create_blank_template_draft(request: NewDraftRequest):
     return create_blank_template_draft_service(repository, request.name)
+
+
+@app.post("/api/v1/template-drafts/create", response_model=NamedDraftResponse, status_code=201)
+def create_named_template_draft(request: NewDraftRequest):
+    draft, created = create_named_template_draft_service(repository, request.name)
+    return NamedDraftResponse(draft=draft, created=created, idempotent=not created)
 
 
 @app.get("/api/v1/template-drafts", response_model=list[TemplateDraft])

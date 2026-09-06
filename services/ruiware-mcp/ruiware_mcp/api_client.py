@@ -39,6 +39,9 @@ class RuiWareApiClient:
     def post(self, path: str, payload: dict[str, Any] | None = None) -> Any:
         return self._request("POST", path, payload)
 
+    def put(self, path: str, payload: dict[str, Any] | None = None) -> Any:
+        return self._request("PUT", path, payload)
+
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
         request = urllib.request.Request(

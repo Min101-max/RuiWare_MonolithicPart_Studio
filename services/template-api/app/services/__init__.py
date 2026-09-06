@@ -9,6 +9,7 @@ from .operations import (
     compile_template_draft,
     complete_template_stage,
     create_blank_template_draft,
+    create_named_template_draft,
     create_material_binding,
     create_template_draft,
     download_source_package,

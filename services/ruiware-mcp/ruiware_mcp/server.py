@@ -11,7 +11,7 @@ from .core.additional_tools import ADDITIONAL_TOOLS
 from .tools.authoring import apply_material, apply_parameter_changes, apply_sketch, get_parameter_contract, preview_material, preview_parameter_changes, preview_proposal, preview_sketch, search_materials, solve_sketch, submit_proposal, validate_parameter_values
 from .tools.guidance import explain_error, get_next_actions, get_parameter_help
 from .tools.read import get_attachment, get_current_draft_status, get_draft_context, get_validation_result
-from .tools.workflow import check_brep, compile_draft, complete_stage, evaluate_draft, get_compile_artifacts, get_latest_compile
+from .tools.workflow import check_brep, compile_draft, complete_stage, create_template, evaluate_draft, execute_task, get_compile_artifacts, get_latest_compile, plan_task, publish_template
 
 
 TOOLS = [
@@ -56,6 +56,8 @@ class McpApplication:
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         draft_id = arguments.get("draftId", "")
+        if name == "create_template":
+            return create_template(self.client, arguments)
         if name == "ruiware_get_current_draft_status":
             return get_current_draft_status(self.client, arguments)
         if name == "ruiware_get_draft_context":
@@ -86,6 +88,12 @@ class McpApplication:
             return apply_material(self.client, arguments)
         if name == "ruiware_search_materials":
             return search_materials(self.client, arguments)
+        if name == "ruiware_plan_task":
+            return plan_task(self.client, arguments)
+        if name == "ruiware_execute_task":
+            return execute_task(self.client, arguments)
+        if name == "ruiware_publish_template":
+            return publish_template(self.client, arguments)
         if name == "ruiware_get_validation_result":
             return get_validation_result(self.client, arguments)
         if name == "ruiware_compile_draft":
