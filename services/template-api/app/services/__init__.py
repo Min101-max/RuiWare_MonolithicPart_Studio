@@ -26,6 +26,7 @@ from .operations import (
     resolve_material_binding,
     restore_template_draft,
     restore_template_revision,
+    rollback_template_revision,
     search_materials,
     update_template_attachment,
     update_template_draft,

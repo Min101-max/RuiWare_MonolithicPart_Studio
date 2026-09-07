@@ -67,6 +67,7 @@ from .services.operations import (  # noqa: E402
     resolve_material_binding as resolve_material_binding_service,
     restore_template_draft as restore_template_draft_service,
     restore_template_revision as restore_template_revision_service,
+    rollback_template_revision as rollback_template_revision_service,
     search_materials as search_materials_service,
     upload_template_attachment as upload_template_attachment_service,
     update_template_attachment as update_template_attachment_service,
@@ -86,6 +87,7 @@ from .services.operations import (  # noqa: E402
     get_current_draft as get_current_draft_service,
     set_current_draft as set_current_draft_service,
 )  # noqa: E402
+from .services.write_context import parse_write_context  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -181,6 +183,12 @@ class TaskExecuteRequest(TaskPlanRequest):
     input: dict[str, Any] = Field(default_factory=dict)
 
 
+class RollbackRequest(BaseModel):
+    targetRevision: int = Field(ge=1)
+    baseRevision: int = Field(ge=1)
+    confirmed: bool = False
+
+
 material_library = RuiWareMaterialLibrary(MATERIAL_DATABASE)
 repository = Repository(LOCAL_DATABASE, material_library)
 
@@ -198,6 +206,73 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _agent_guard_exempt(path: str) -> bool:
+    if path in {
+        "/api/v1/template-drafts",
+        "/api/v1/template-drafts/blank",
+        "/api/v1/template-drafts/create",
+        "/api/v1/material-bindings",
+        "/api/v1/workspace/current-draft",
+        "/api/v1/materials/search",
+        "/api/v1/sketches/solve",
+        "/api/v1/compile-preview",
+    }:
+        return True
+    return any(marker in path for marker in ("/preview", "/validate", "/evaluate", "/assistant/tasks/plan"))
+
+
+def _draft_id_from_path(path: str) -> str | None:
+    marker = "/api/v1/template-drafts/"
+    if marker not in path:
+        return None
+    candidate = path.split(marker, 1)[1].split("/", 1)[0]
+    return None if candidate in {"blank", "create"} else candidate
+
+
+@app.middleware("http")
+async def write_context_middleware(request: Request, call_next):
+    mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    guarded = mutating and not _agent_guard_exempt(request.url.path)
+    try:
+        context = parse_write_context(request, require_write_guard=guarded)
+    except HTTPException as error:
+        draft_id = _draft_id_from_path(request.url.path)
+        before = repository.get_draft_optional(draft_id) if draft_id else None
+        detail = error.detail if isinstance(error.detail, dict) else {}
+        repository.record_audit(
+            action=f"{request.method} {request.url.path}",
+            actor=request.headers.get("X-RuiWare-Actor", "gui"),
+            source=request.headers.get("X-RuiWare-Source", "gui"),
+            session_id=request.headers.get("X-RuiWare-Session"),
+            draft_id=draft_id,
+            before_revision=before.revision if before else None,
+            after_revision=before.revision if before else None,
+            confirmed=False,
+            status="failed",
+            error_code=detail.get("code"),
+            metadata={"statusCode": error.status_code},
+        )
+        return await http_exception_handler(request, error)
+    draft_id = _draft_id_from_path(request.url.path)
+    before = repository.get_draft_optional(draft_id) if draft_id else None
+    response = await call_next(request)
+    if mutating and request.url.path != "/api/v1/template-drafts/{draft_id}/rollback" and not request.url.path.endswith("/rollback"):
+        after = repository.get_draft_optional(draft_id) if draft_id else None
+        repository.record_audit(
+            action=f"{request.method} {request.url.path}",
+            actor=context.actor,
+            source=context.source,
+            session_id=context.session_id,
+            draft_id=draft_id,
+            before_revision=before.revision if before else None,
+            after_revision=after.revision if after else None,
+            confirmed=context.confirmed,
+            status="succeeded" if 200 <= response.status_code < 400 else "failed",
+            metadata={"statusCode": response.status_code},
+        )
+    return response
 app.mount("/artifacts", StaticFiles(directory=ARTIFACT_ROOT), name="artifacts")
 app.mount("/uploads", StaticFiles(directory=ATTACHMENT_ROOT), name="uploads")
 
@@ -373,6 +448,28 @@ def list_template_revisions(draft_id: str):
 @app.post("/api/v1/template-drafts/{draft_id}/revisions/{revision}/restore", response_model=TemplateDraft)
 def restore_template_revision(draft_id: str, revision: int):
     return restore_template_revision_service(repository, draft_id, revision)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/rollback", response_model=TemplateDraft)
+def rollback_template_revision(draft_id: str, body: RollbackRequest, request: Request):
+    context = parse_write_context(
+        request,
+        {"baseRevision": body.baseRevision, "confirmed": body.confirmed},
+        require_write_guard=True,
+    )
+    return rollback_template_revision_service(
+        repository,
+        draft_id,
+        body.targetRevision,
+        body.baseRevision,
+        body.confirmed,
+        context,
+    )
+
+
+@app.get("/api/v1/audit-logs")
+def list_audit_logs(draftId: str | None = None, limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": repository.list_audit(draft_id=draftId, limit=limit)}
 
 
 @app.get("/api/v1/template-drafts/{draft_id}/stages/{stage}/validate", response_model=StageValidation)

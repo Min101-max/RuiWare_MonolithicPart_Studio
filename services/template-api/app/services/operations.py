@@ -14,6 +14,7 @@ from .draft import (
     list_template_revisions,
     restore_template_draft,
     restore_template_revision,
+    rollback_template_revision,
     upload_template_attachment,
     update_template_draft,
     update_template_attachment,

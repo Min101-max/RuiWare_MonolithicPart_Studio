@@ -23,4 +23,10 @@ describe("draft state synchronization", () => {
     expect(remoteDraftNeedsSync(local, { id: "draft-2", revision: 4 } as Draft)).toBe(false);
     expect(remoteDraftNeedsSync(null, { id: "draft-1", revision: 4 } as Draft)).toBe(false);
   });
+
+  it("keeps a dirty local draft eligible for explicit conflict review", () => {
+    const local = { id: "draft-1", revision: 3 } as Draft;
+    const remote = { id: "draft-1", revision: 4 } as Draft;
+    expect(remoteDraftNeedsSync(local, remote)).toBe(true);
+  });
 });

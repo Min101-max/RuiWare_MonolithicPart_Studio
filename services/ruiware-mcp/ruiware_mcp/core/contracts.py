@@ -16,6 +16,8 @@ SERVER_INFO = {
 
 
 TOOL_CONTRACTS = {
+    "ruiware_get_audit_log": {"required": (), "read_only": True},
+    "ruiware_rollback_draft": {"required": ("draftId", "targetRevision", "baseRevision", "confirmed"), "read_only": False},
     "create_template": {"required": ("name",), "read_only": False},
     "ruiware_get_draft_context": {
         "required": ("draftId",),
