@@ -389,6 +389,15 @@ Repository
 - GUI 通过当前 `draftId` 和 `revision` 感知 Agent 修改；无本地编辑时自动同步，有本地编辑时保留本地内容并提示冲突。
 - 统一错误响应包含错误码、处理建议、字段、追踪标识和 `retryable`，便于 GUI 和 Agent 判断是否可以重试。
 
+### 6.11 第五、六阶段：确认、审计、并发与稳定性
+
+- `services/write_context.py` 解析 `X-RuiWare-*` 写入上下文；Agent 请求统一携带操作者、来源、会话、`baseRevision` 和确认状态，旧 GUI 请求保持兼容。
+- `Repository.operation_audit` 记录操作、操作者、草稿前后 revision、确认状态、结果和错误；`GET /api/v1/audit-logs` 与 MCP `ruiware_get_audit_log` 提供只读查询。
+- `POST /template-drafts/{draftId}/rollback` 与 MCP `ruiware_rollback_draft` 从历史 revision 生成新 revision，不覆写历史记录。
+- `Repository.save_draft` 使用 SQLite `BEGIN IMMEDIATE` 在 revision 检查和写入之间建立原子边界；并发旧 revision 只允许一个写入成功。
+- MCP API 客户端对连接错误和 5xx 进行最多两次退避重试；409、422 以及默认非幂等写入不重试。
+- 稳定性回归位于 `tests/test_phase5_api.py`、`tests/test_phase5_mcp.py`、`tests/test_mcp_retry.py`、`tests/test_phase6_stability.py` 和 `apps/studio-web/src/features/draft/useDraftWorkspace.test.ts`。
+
 当前安全等级适用于本机单用户开发和受控演示环境；多人协作或公网部署前仍需完善：
 
 1. 将 `baseRevision` 校验统一覆盖所有写操作，包括材料绑定、阶段完成、编译和发布。
@@ -396,7 +405,7 @@ Repository
 3. 将全局 `workspace_context` 升级为按用户、会话或工作区隔离，避免不同用户共享当前零部件选择。
 4. 增加 GUI、Agent、用户和工具维度的身份授权，区分查询、编辑、CAD 执行和发布审批权限。
 5. 完善 Agent 操作审计，记录操作者来源、会话、工具、修改前后版本、变更差异、确认信息和执行结果。
-6. 增加 GUI 自动刷新、并发修改、版本冲突、参数越界、草图退化、CAD 失败恢复和 MCP 断线重试测试。
+6. 将现有 GUI 自动刷新、并发修改、版本冲突、参数越界、草图退化、CAD 失败恢复和 MCP 断线重试测试扩展到真实多会话环境。
 
 因此，当前架构的安全结论是：本机单用户场景基本可用；多人协作需要补齐会话隔离、统一并发控制和权限；公网生产部署前还需要认证、授权、审计和更严格的确认机制。
 

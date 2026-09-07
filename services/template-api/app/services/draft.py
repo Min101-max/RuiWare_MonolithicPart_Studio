@@ -13,6 +13,7 @@ from ..repository import DuplicateCodeError, Repository
 from ._common import ALLOWED_ATTACHMENT_EXTENSIONS, AttachmentUpdateRequestBody, attachment_target_path, draft_or_404, next_template_code, now, save_draft
 from .proposal import sync_sketch_seed_coordinates
 from .context import validate_stage_with_context
+from .write_context import WriteContext
 
 
 def create_blank_template_draft(repository: Repository, name: str) -> TemplateDraft:
@@ -84,6 +85,42 @@ def restore_template_revision(repository: Repository, draft_id: str, revision: i
         return repository.restore_revision(draft_id, revision)
     except KeyError as error:
         raise api_error("DRAFT_REVISION_NOT_FOUND", status_code=404, context={"draftId": draft_id, "revision": revision}) from error
+
+
+def rollback_template_revision(
+    repository: Repository,
+    draft_id: str,
+    target_revision: int,
+    base_revision: int,
+    confirmed: bool,
+    context: WriteContext,
+) -> TemplateDraft:
+    draft = draft_or_404(repository, draft_id)
+    if context.actor == "agent" and not confirmed:
+        raise api_error("WRITE_CONFIRMATION_REQUIRED", status_code=422)
+    if draft.revision != base_revision:
+        raise api_error(
+            "DRAFT_REVISION_CONFLICT",
+            status_code=409,
+            context={"draftId": draft_id, "expectedRevision": base_revision, "currentRevision": draft.revision},
+        )
+    try:
+        restored = repository.restore_revision(draft_id, target_revision)
+    except KeyError as error:
+        raise api_error("DRAFT_REVISION_NOT_FOUND", status_code=404, context={"draftId": draft_id, "revision": target_revision}) from error
+    repository.record_audit(
+        action="rollback",
+        actor=context.actor,
+        source=context.source,
+        session_id=context.session_id,
+        draft_id=draft_id,
+        before_revision=draft.revision,
+        after_revision=restored.revision,
+        confirmed=confirmed,
+        status="succeeded",
+        metadata={"targetRevision": target_revision},
+    )
+    return restored
 
 
 def validate_template_stage(repository: Repository, stage: StageName, draft: TemplateDraft) -> StageValidation:

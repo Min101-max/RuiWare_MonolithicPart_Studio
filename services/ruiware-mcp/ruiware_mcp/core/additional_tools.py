@@ -5,6 +5,16 @@ from __future__ import annotations
 
 ADDITIONAL_TOOLS = [
     {
+        "name": "ruiware_get_audit_log",
+        "description": "读取模板操作审计记录，包括操作者、工具、版本和结果；不修改平台数据。",
+        "inputSchema": {"type": "object", "properties": {"draftId": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 500}}},
+    },
+    {
+        "name": "ruiware_rollback_draft",
+        "description": "在用户确认且修订未变化时将模板恢复到历史修订，并生成新的可追溯 revision。",
+        "inputSchema": {"type": "object", "required": ["draftId", "targetRevision", "baseRevision", "confirmed"], "properties": {"draftId": {"type": "string"}, "targetRevision": {"type": "integer", "minimum": 1}, "baseRevision": {"type": "integer", "minimum": 1}, "confirmed": {"type": "boolean"}}},
+    },
+    {
         "name": "create_template",
         "description": "按名称幂等创建空白模板并将其选为 GUI 当前零部件。",
         "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},

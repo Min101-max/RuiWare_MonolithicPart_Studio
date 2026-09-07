@@ -10,8 +10,8 @@ from .core.responses import tool_result
 from .core.additional_tools import ADDITIONAL_TOOLS
 from .tools.authoring import apply_material, apply_parameter_changes, apply_sketch, get_parameter_contract, preview_material, preview_parameter_changes, preview_proposal, preview_sketch, search_materials, solve_sketch, submit_proposal, validate_parameter_values
 from .tools.guidance import explain_error, get_next_actions, get_parameter_help
-from .tools.read import get_attachment, get_current_draft_status, get_draft_context, get_validation_result
-from .tools.workflow import check_brep, compile_draft, complete_stage, create_template, evaluate_draft, execute_task, get_compile_artifacts, get_latest_compile, plan_task, publish_template
+from .tools.read import get_attachment, get_audit_log, get_current_draft_status, get_draft_context, get_validation_result
+from .tools.workflow import check_brep, compile_draft, complete_stage, create_template, evaluate_draft, execute_task, get_compile_artifacts, get_latest_compile, plan_task, publish_template, rollback_draft
 
 
 TOOLS = [
@@ -58,6 +58,10 @@ class McpApplication:
         draft_id = arguments.get("draftId", "")
         if name == "create_template":
             return create_template(self.client, arguments)
+        if name == "ruiware_get_audit_log":
+            return get_audit_log(self.client, arguments)
+        if name == "ruiware_rollback_draft":
+            return rollback_draft(self.client, arguments)
         if name == "ruiware_get_current_draft_status":
             return get_current_draft_status(self.client, arguments)
         if name == "ruiware_get_draft_context":

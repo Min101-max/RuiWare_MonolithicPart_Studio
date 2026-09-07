@@ -4,6 +4,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+import time
 from typing import Any
 
 
@@ -30,57 +31,89 @@ class RuiWareApiError(RuntimeError):
 
 
 class RuiWareApiClient:
-    def __init__(self, base_url: str | None = None) -> None:
+    def __init__(self, base_url: str | None = None, *, max_retries: int = 2, sleep_fn=time.sleep) -> None:
         self.base_url = (base_url or os.getenv("RUIWARE_API_URL") or "http://127.0.0.1:8010/api/v1").rstrip("/")
+        self.max_retries = max(0, max_retries)
+        self.sleep_fn = sleep_fn
 
-    def get(self, path: str) -> Any:
-        return self._request("GET", path)
+    def get(self, path: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> Any:
+        return self._request("GET", path, params=params, headers=headers, retry_safe=True)
 
-    def post(self, path: str, payload: dict[str, Any] | None = None) -> Any:
-        return self._request("POST", path, payload)
+    def post(self, path: str, payload: dict[str, Any] | None = None, *, headers: dict[str, str] | None = None, retry_safe: bool = False) -> Any:
+        return self._request("POST", path, payload, headers=self._context_headers(payload, headers), retry_safe=retry_safe)
 
-    def put(self, path: str, payload: dict[str, Any] | None = None) -> Any:
-        return self._request("PUT", path, payload)
+    def put(self, path: str, payload: dict[str, Any] | None = None, *, headers: dict[str, str] | None = None, retry_safe: bool = False) -> Any:
+        return self._request("PUT", path, payload, headers=headers, retry_safe=retry_safe)
 
-    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+    @staticmethod
+    def _context_headers(payload: dict[str, Any] | None, headers: dict[str, str] | None) -> dict[str, str] | None:
+        if headers is not None or not isinstance(payload, dict):
+            return headers
+        if "baseRevision" not in payload and "confirmed" not in payload:
+            return None
+        result = {
+            "X-RuiWare-Actor": "agent",
+            "X-RuiWare-Source": "mcp",
+        }
+        if "baseRevision" in payload:
+            result["X-RuiWare-Base-Revision"] = str(payload["baseRevision"])
+        if "confirmed" in payload:
+            result["X-RuiWare-Confirmed"] = str(payload["confirmed"]).lower()
+        if payload.get("sessionId"):
+            result["X-RuiWare-Session"] = str(payload["sessionId"])
+        return result
+
+    def _request(self, method: str, path: str, payload: dict[str, Any] | None = None, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None, retry_safe: bool = False) -> Any:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8") if payload is not None else None
+        if params:
+            from urllib.parse import urlencode
+            path = f"{path}?{urlencode(params)}"
         request = urllib.request.Request(
             f"{self.base_url}{path}", data=data, method=method,
-            headers={"Content-Type": "application/json"} if data is not None else {},
+            headers={**({"Content-Type": "application/json"} if data is not None else {}), **(headers or {})},
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            body = error.read().decode("utf-8", errors="replace")
+        for attempt in range(self.max_retries + 1):
             try:
-                response_payload = json.loads(body)
-            except json.JSONDecodeError:
-                response_payload = {}
-            detail = response_payload.get("error") or response_payload.get("detail")
-            if not isinstance(detail, dict) or "code" not in detail:
-                detail = {
-                    "code": f"HTTP_{error.code}",
-                    "message": detail if isinstance(detail, str) else body or error.reason,
-                    "action": "请检查请求参数或服务状态后重试。",
-                    "fields": [],
-                    "traceId": "",
-                    "retryable": error.code >= 500,
-                }
-            raise RuiWareApiError(
-                str(detail.get("message") or f"RuiWare API {error.code}"),
-                status=error.code,
-                payload=detail,
-            ) from error
-        except urllib.error.URLError as error:
-            raise RuiWareApiError(
-                f"无法连接 RuiWare API（{self.base_url}）：{error.reason}",
-                payload={
-                    "code": "MCP_API_UNAVAILABLE",
-                    "message": f"无法连接 RuiWare API（{self.base_url}）。",
-                    "action": "请启动模板 API 后重试。",
-                    "fields": [],
-                    "traceId": "",
-                    "retryable": True,
-                },
-            ) from error
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as error:
+                body = error.read().decode("utf-8", errors="replace")
+                try:
+                    response_payload = json.loads(body)
+                except json.JSONDecodeError:
+                    response_payload = {}
+                detail = response_payload.get("error") or response_payload.get("detail")
+                if not isinstance(detail, dict) or "code" not in detail:
+                    detail = {
+                        "code": f"HTTP_{error.code}",
+                        "message": detail if isinstance(detail, str) else body or error.reason,
+                        "action": "请检查请求参数或服务状态后重试。",
+                        "fields": [],
+                        "traceId": "",
+                        "retryable": error.code >= 500,
+                    }
+                api_error = RuiWareApiError(
+                    str(detail.get("message") or f"RuiWare API {error.code}"),
+                    status=error.code,
+                    payload=detail,
+                )
+                if retry_safe and error.code >= 500 and attempt < self.max_retries:
+                    self.sleep_fn(0.05 * (2 ** attempt))
+                    continue
+                raise api_error from error
+            except urllib.error.URLError as error:
+                if retry_safe and attempt < self.max_retries:
+                    self.sleep_fn(0.05 * (2 ** attempt))
+                    continue
+                raise RuiWareApiError(
+                    f"无法连接 RuiWare API（{self.base_url}）：{error.reason}",
+                    payload={
+                        "code": "MCP_API_UNAVAILABLE",
+                        "message": f"无法连接 RuiWare API（{self.base_url}）。",
+                        "action": "请启动模板 API 后重试。",
+                        "fields": [],
+                        "traceId": "",
+                        "retryable": True,
+                    },
+                ) from error
+        raise RuntimeError("unreachable")
