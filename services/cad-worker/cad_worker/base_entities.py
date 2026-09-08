@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import math
 
+from OCP.Bnd import Bnd_Box
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeEdge,
     BRepBuilderAPI_MakeFace,
@@ -12,6 +14,37 @@ from OCP.BRepBuilderAPI import (
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakePrism
 from OCP.GC import GC_MakeArcOfCircle
 from OCP.gp import gp_Ax2, gp_Circ, gp_Dir, gp_Pnt, gp_Vec
+
+
+def _through_penetration_for_shape(shape, minimum: float) -> float:
+    """Return a through-tool length that encloses the current bounded shape.
+
+    Locator-based tools start half this distance outside their resolved support
+    face, so twice the bounding-box diagonal reaches beyond every possible
+    opposite point.  The absolute-coordinate bound also keeps the legacy
+    fixed ``+/- penetration / 2`` start planes outside translated geometry.
+    """
+
+    lower_bound = max(0.0, float(minimum))
+    bounds = Bnd_Box()
+    BRepBndLib.AddOptimal_s(shape, bounds, False, False)
+    if bounds.IsVoid():
+        return lower_bound
+
+    xmin, ymin, zmin, xmax, ymax, zmax = bounds.Get()
+    values = (xmin, ymin, zmin, xmax, ymax, zmax)
+    if not all(math.isfinite(value) for value in values):
+        return lower_bound
+
+    diagonal = math.sqrt(
+        (xmax - xmin) ** 2 + (ymax - ymin) ** 2 + (zmax - zmin) ** 2
+    )
+    absolute_extent = max(abs(value) for value in values)
+    half_span = max(diagonal, absolute_extent)
+    clearance = max(1.0, half_span * 1e-6)
+    return max(lower_bound, 2.0 * (half_span + clearance))
+
+
 def _box(x: float, y: float, z: float, dx: float, dy: float, dz: float):
     return BRepPrimAPI_MakeBox(gp_Pnt(x, y, z), dx, dy, dz).Shape()
 

@@ -302,6 +302,34 @@ export type SweepPathSketch = {
   generationStatus?: "idle" | "generating" | "failed" | "succeeded";
   diagnostics: Diagnostic[];
 };
+type SemanticFaceLocatorBase = {
+  operationId: string;
+  profileSketchId: string;
+  sourceEntityId: string;
+};
+export type SemanticFaceLocator =
+  | (SemanticFaceLocatorBase & {
+      kind: "profileEdge";
+      /** Python's JSON model includes null for this non-applicable field. */
+      capSide?: null;
+    })
+  | (SemanticFaceLocatorBase & {
+      kind: "profileRegion";
+      /** Distinguishes the two caps made from one profile region. */
+      capSide: "start" | "end";
+    });
+export type SemanticFaceDefinition = {
+  id: string;
+  label: string;
+  hostFrame: "negativeY" | "positiveY" | "negativeX" | "positiveX" | "negativeZ" | "positiveZ";
+  sourceOperationId: string;
+  /** Missing on legacy drafts created before source-profile face binding. */
+  locator?: SemanticFaceLocator | null;
+  uStartExpression: string;
+  uSpanExpression: string;
+  vStartExpression: string;
+  vSpanExpression: string;
+};
 export type GeometryRecipe = {
   id: string;
   constructionMode:
@@ -332,16 +360,7 @@ export type GeometryRecipe = {
     twistMode?: "none";
     cornerMode?: "right";
   }[];
-  semanticFaces: {
-    id: string;
-    label: string;
-    hostFrame: "negativeY" | "positiveY" | "negativeX" | "positiveX" | "negativeZ" | "positiveZ";
-    sourceOperationId: string;
-    uStartExpression: string;
-    uSpanExpression: string;
-    vStartExpression: string;
-    vSpanExpression: string;
-  }[];
+  semanticFaces: SemanticFaceDefinition[];
   reviewed: boolean;
 };
 export type FeatureRule = {
@@ -397,6 +416,12 @@ export type ResolvedFeature = {
   arguments: Record<string, string | number | boolean>;
   semanticFaceId: string;
   hostFace: "negativeY" | "positiveY" | "negativeX" | "positiveX" | "negativeZ" | "positiveZ";
+  locator?: SemanticFaceLocator | null;
+  resolvedSourceEntityId?: string | null;
+  resolvedUStart?: number | null;
+  resolvedUSpan?: number | null;
+  resolvedVStart?: number | null;
+  resolvedVSpan?: number | null;
   polygonVertices: [number, number][];
   sourceRuleId: string;
   index: number;

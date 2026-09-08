@@ -97,6 +97,21 @@ class Repository:
                     current_draft_id TEXT,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS operation_audit (
+                    id TEXT PRIMARY KEY,
+                    action TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    session_id TEXT,
+                    draft_id TEXT,
+                    before_revision INTEGER,
+                    after_revision INTEGER,
+                    confirmed INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    error_code TEXT,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
                 """
             )
             connection.execute(
@@ -205,44 +220,48 @@ class Repository:
         apply_invalidation: bool = True,
     ) -> TemplateDraft:
         draft_id = draft.id or f"draft-{uuid.uuid4().hex[:12]}"
-        existing = self.get_draft_optional(draft_id, include_archived=True)
-        if existing and expected_revision is not None and existing.revision != expected_revision:
-            raise RevisionConflictError(f"expected revision {expected_revision}, current revision {existing.revision}")
         if not self.code_is_unique(draft.code, draft_id):
             raise DuplicateCodeError(draft.code)
-
-        next_revision = existing.revision + 1 if existing else 1
-        now = _now()
-        created_at = existing.createdAt if existing and existing.createdAt else now
-        stage_status = draft.stageStatus.model_copy(deep=True)
-        lifecycle_status = draft.lifecycleStatus
-        changed_index: int | None = None
-        if existing and apply_invalidation:
-            for index, stage in enumerate(STAGE_ORDER):
-                if stage == "review":
-                    continue
-                if stage_fingerprint(stage, existing) != stage_fingerprint(stage, draft):
-                    changed_index = index if changed_index is None else min(changed_index, index)
-            if changed_index is not None:
-                for index, stage in enumerate(STAGE_ORDER):
-                    if index == changed_index:
-                        setattr(stage_status, stage, "in_progress")
-                    elif index > changed_index:
-                        setattr(stage_status, stage, "not_started")
-                if lifecycle_status == "published":
-                    lifecycle_status = "draft"
-        saved = draft.model_copy(
-            update={
-                "id": draft_id,
-                "revision": next_revision,
-                "createdAt": created_at,
-                "updatedAt": now,
-                "stageStatus": stage_status,
-                "lifecycleStatus": lifecycle_status,
-            }
-        )
-        payload = saved.model_dump_json()
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT payload_json FROM template_drafts WHERE id = ?",
+                (draft_id,),
+            ).fetchone()
+            existing = self._parse_draft(row["payload_json"]) if row else None
+            if existing and expected_revision is not None and existing.revision != expected_revision:
+                raise RevisionConflictError(f"expected revision {expected_revision}, current revision {existing.revision}")
+            next_revision = existing.revision + 1 if existing else 1
+            now = _now()
+            created_at = existing.createdAt if existing and existing.createdAt else now
+            stage_status = draft.stageStatus.model_copy(deep=True)
+            lifecycle_status = draft.lifecycleStatus
+            changed_index: int | None = None
+            if existing and apply_invalidation:
+                for index, stage in enumerate(STAGE_ORDER):
+                    if stage == "review":
+                        continue
+                    if stage_fingerprint(stage, existing) != stage_fingerprint(stage, draft):
+                        changed_index = index if changed_index is None else min(changed_index, index)
+                if changed_index is not None:
+                    for index, stage in enumerate(STAGE_ORDER):
+                        if index == changed_index:
+                            setattr(stage_status, stage, "in_progress")
+                        elif index > changed_index:
+                            setattr(stage_status, stage, "not_started")
+                    if lifecycle_status == "published":
+                        lifecycle_status = "draft"
+            saved = draft.model_copy(
+                update={
+                    "id": draft_id,
+                    "revision": next_revision,
+                    "createdAt": created_at,
+                    "updatedAt": now,
+                    "stageStatus": stage_status,
+                    "lifecycleStatus": lifecycle_status,
+                }
+            )
+            payload = saved.model_dump_json()
             connection.execute(
                 """
                 INSERT INTO template_drafts (id, name, revision, payload_json, created_at, updated_at, archived_at)
@@ -328,6 +347,81 @@ class Repository:
                 "UPDATE workspace_context SET current_draft_id = NULL, updated_at = ? WHERE id = 'default'",
                 (_now(),),
             )
+
+    def record_audit(
+        self,
+        *,
+        action: str,
+        actor: str,
+        source: str,
+        session_id: str | None,
+        draft_id: str | None,
+        before_revision: int | None,
+        after_revision: int | None,
+        confirmed: bool,
+        status: str,
+        error_code: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        entry = {
+            "id": f"audit-{uuid.uuid4().hex[:12]}",
+            "action": action,
+            "actor": actor,
+            "source": source,
+            "sessionId": session_id,
+            "draftId": draft_id,
+            "beforeRevision": before_revision,
+            "afterRevision": after_revision,
+            "confirmed": confirmed,
+            "status": status,
+            "errorCode": error_code,
+            "metadata": metadata or {},
+            "createdAt": _now(),
+        }
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO operation_audit (
+                    id, action, actor, source, session_id, draft_id,
+                    before_revision, after_revision, confirmed, status,
+                    error_code, metadata_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    entry["id"], entry["action"], entry["actor"], entry["source"], entry["sessionId"],
+                    entry["draftId"], entry["beforeRevision"], entry["afterRevision"], int(entry["confirmed"]),
+                    entry["status"], entry["errorCode"], json.dumps(entry["metadata"], ensure_ascii=False), entry["createdAt"],
+                ),
+            )
+        return entry
+
+    def list_audit(self, *, draft_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+        bounded_limit = max(1, min(limit, 500))
+        where = "WHERE draft_id = ?" if draft_id else ""
+        params: tuple[Any, ...] = (draft_id, bounded_limit) if draft_id else (bounded_limit,)
+        with self.connect() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM operation_audit {where} ORDER BY created_at DESC, id DESC LIMIT ?",
+                params,
+            ).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "action": row["action"],
+                "actor": row["actor"],
+                "source": row["source"],
+                "sessionId": row["session_id"],
+                "draftId": row["draft_id"],
+                "beforeRevision": row["before_revision"],
+                "afterRevision": row["after_revision"],
+                "confirmed": bool(row["confirmed"]),
+                "status": row["status"],
+                "errorCode": row["error_code"],
+                "metadata": json.loads(row["metadata_json"]),
+                "createdAt": row["created_at"],
+            }
+            for row in rows
+        ]
 
     def restore_draft(self, draft_id: str) -> TemplateDraft:
         draft = self.get_draft(draft_id, include_archived=True)

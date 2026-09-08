@@ -188,6 +188,45 @@ def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
     return diagnostics
 
 
+def _referenced_semantic_face_locator_diagnostics(
+    draft: TemplateDraft, referenced_face_ids: set[str]
+) -> list[Diagnostic]:
+    """Validate locators that are about to enter manufacturing operations.
+
+    Stage validation checks every authored semantic face.  Lowering repeats the
+    check only for faces used by resolved features so an invalid stable source
+    cannot reach CAD, while unrelated legacy/sweep definitions remain outside
+    the extrusion-only locator contract.
+    """
+
+    if not referenced_face_ids:
+        return []
+
+    # Keep the reference rules in one place.  The local import also prevents
+    # lowering/stage module initialization from becoming coupled.
+    from .stages import _validate_semantic_face_locators
+
+    diagnostics: list[Diagnostic] = []
+    faces = {
+        face.id: face
+        for face in draft.geometryRecipe.semanticFaces
+        if face.id in referenced_face_ids and face.locator is not None
+    }
+    for face_id, face in sorted(faces.items()):
+        recipe = draft.geometryRecipe.model_copy(update={"semanticFaces": [face]})
+        scoped_draft = draft.model_copy(update={"geometryRecipe": recipe})
+        valid, message = _validate_semantic_face_locators(scoped_draft)
+        if not valid:
+            diagnostics.append(Diagnostic(
+                severity="error",
+                code="SEMANTIC_FACE_LOCATOR_INVALID",
+                path=f"geometryRecipe.semanticFaces.{face_id}.locator",
+                message=message,
+                suggestion="修复来源操作、截面草图或稳定实体/区域 ID 后重新生成计划。",
+            ))
+    return diagnostics
+
+
 def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> CanonicalPlan:
     material_snapshot = stable_material_snapshot(material_snapshot)
     external_context = {
@@ -218,6 +257,10 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
         Diagnostic(severity=item.severity, code=item.code, path=item.path, message=item.message)
         for item in evaluation.diagnostics
     )
+    diagnostics.extend(_referenced_semantic_face_locator_diagnostics(
+        draft,
+        {feature.semanticFaceId for feature in evaluation.features},
+    ))
     operations: list[StaticOperation] = []
     geometry_context = {**external_context, **evaluation.values}
     for definition in draft.geometryRecipe.operations:
@@ -268,7 +311,20 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
                     arguments["pathStationTangents"] = sampled_path_payload.station_tangents
                     arguments["pathPlane"] = getattr(draft.sweepPath, "plane", "XY")
             if definition.operator in {"profile.open_profile_tube_extrude", "sketch.region_extrude", "sketch.centerline_thinwall_extrude", "solid.revolve", "solid.sweep", "solid.loft"} and sketch_case is not None:
+                profile_sketch_id = definition.profileSketchId or next(
+                    (
+                        reference
+                        for reference in definition.sourceRefs
+                        if reference in set(draft.geometryRecipe.sketches)
+                    ),
+                    draft.geometryRecipe.sketches[0]
+                    if len(draft.geometryRecipe.sketches) == 1
+                    else None,
+                )
+                if profile_sketch_id is not None:
+                    arguments["profileSketchId"] = profile_sketch_id
                 arguments["sketch"] = {
+                    "id": profile_sketch_id,
                     "profileMode": draft.sketch.profileMode,
                     "plane": draft.sketch.plane,
                     "primitives": sketch_case["primitives"],
@@ -276,6 +332,49 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
                     "topologySignature": sketch_case["topologySignature"],
                     "thickness": evaluation.values.get("thickness"),
                 }
+            # Carry authored semantic-face declarations with the operation so
+            # exporters can publish every stable source, including faces that
+            # are not currently referenced by a manufacturing rule.
+            supported_locator_operator = definition.operator in {
+                "profile.open_profile_tube_extrude",
+                "sketch.region_extrude",
+            }
+            source_entity_ids = {
+                entity.id for entity in draft.sketch.entities
+            }
+            source_region_ids = {
+                region.id for region in draft.sketch.regions
+            }
+            declared_semantic_faces = [
+                {
+                    "semanticFaceId": face.id,
+                    "sourceOperationId": face.sourceOperationId,
+                    "hostFrame": face.hostFrame,
+                    "locator": (
+                        face.locator.model_dump(mode="json")
+                        if face.locator is not None
+                        else None
+                    ),
+                }
+                for face in draft.geometryRecipe.semanticFaces
+                if (
+                    supported_locator_operator
+                    and face.sourceOperationId == definition.id
+                    and (
+                        face.locator is None
+                        or (
+                            face.locator.kind == "profileEdge"
+                            and face.locator.sourceEntityId in source_entity_ids
+                        )
+                        or (
+                            face.locator.kind == "profileRegion"
+                            and face.locator.sourceEntityId in source_region_ids
+                        )
+                    )
+                )
+            ]
+            if declared_semantic_faces:
+                arguments["semanticFaces"] = declared_semantic_faces
             operations.append(StaticOperation(
                 id=definition.id,
                 operator=definition.operator,
@@ -299,13 +398,21 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
         "polygonalCutout": "machining.polygonal_through_cutout",
     }
     for feature in evaluation.features:
+        locator = feature.locator.model_dump(mode="json") if feature.locator is not None else None
         operations.append(StaticOperation(
             id=f"cut.{feature.id}",
             operator=rule_operators[feature.featureType],
             arguments={
                 **feature.arguments,
                 "semanticFaceId": feature.semanticFaceId,
+                "locator": locator,
+                "resolvedSourceEntityId": feature.resolvedSourceEntityId,
+                "hostFrame": feature.hostFace,
                 "hostFace": feature.hostFace,
+                "uStart": feature.resolvedUStart,
+                "uSpan": feature.resolvedUSpan,
+                "vStart": feature.resolvedVStart,
+                "vSpan": feature.resolvedVSpan,
                 "polygonVertices": feature.polygonVertices,
             },
             semanticOutputs=[f"feature.{feature.id}.center", f"feature.{feature.id}.wall"],
