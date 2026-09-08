@@ -21,6 +21,8 @@ class ApiErrorPayload(BaseModel):
     action: str | None = None
     fields: list[dict[str, Any]] = Field(default_factory=list)
     traceId: str
+    retryable: bool = False
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 ERROR_MESSAGES: dict[str, tuple[str, str | None]] = {
@@ -44,10 +46,32 @@ ERROR_MESSAGES: dict[str, tuple[str, str | None]] = {
     "PROPOSAL_INVALID": ("提案命令不符合模板元模型。", "请检查提案内容后重新预览。"),
     "PROPOSAL_EMPTY": ("未选择任何提案命令。", "请选择至少一条命令后再应用。"),
     "PROPOSAL_PREVIEW_FAILED": ("提案预览未通过。", "请先解决预览诊断，再应用提案。"),
+    "PARAMETER_VALUE_INVALID": ("参数值或单位不合法。", "请检查参数类型、单位和允许范围后重试。"),
+    "PARAMETER_CONFIRMATION_REQUIRED": ("参数修改尚未确认。", "请先查看参数修改预览，再明确确认写入。"),
+    "PARAMETER_PREVIEW_FAILED": ("参数修改预览未通过。", "请处理参数求值和下游校验错误后重试。"),
+    "SKETCH_EDIT_INVALID": ("草图修改不合法。", "请检查图元、约束和区域引用后重试。"),
+    "SKETCH_CONFIRMATION_REQUIRED": ("草图修改尚未确认。", "请先查看草图提案预览，再明确确认写入。"),
+    "SKETCH_PREVIEW_FAILED": ("草图提案预览未通过。", "请处理草图约束或拓扑诊断后重试。"),
+    "MATERIAL_CONFIRMATION_REQUIRED": ("材料绑定尚未确认。", "请先查看材料匹配预览，再明确确认写入。"),
+    "MATERIAL_PREVIEW_FAILED": ("材料绑定预览未通过。", "请选择满足材料要求的记录后重试。"),
+    "TASK_CONFIRMATION_REQUIRED": ("任务尚未确认。", "请先查看任务计划，再明确确认执行。"),
+    "TASK_PRECONDITION_FAILED": ("任务前置条件未满足。", "请先处理计划中的阻塞校验项。"),
+    "TASK_REQUIRES_DOMAIN_INPUT": ("任务需要具体修改输入。", "请根据计划提供参数、草图或材料修改内容后重试。"),
+    "WRITE_CONTEXT_INVALID": ("写入上下文不合法。", "请检查操作者、来源和确认字段后重试。"),
+    "WRITE_REVISION_INVALID": ("写入修订号不合法。", "请提供大于零的 baseRevision。"),
+    "WRITE_REVISION_REQUIRED": ("Agent 写入缺少 baseRevision。", "请先读取当前草稿版本，再提交写入。"),
+    "WRITE_CONFIRMATION_REQUIRED": ("Agent 写入尚未确认。", "请先预览变更并明确确认后再写入。"),
     "PUBLISH_ALREADY_PUBLISHED": ("当前修订已发布。", "请先修改模板并重新完成受影响阶段。"),
     "PUBLISH_VALIDATION_FAILED": ("发布准入校验未通过。", "请处理校验项后重新发布。"),
     "REQUEST_INVALID": ("请求数据格式不正确。", "请检查输入字段后重试。"),
     "UNEXPECTED_ERROR": ("服务处理请求时发生未知错误。", "请记录错误码和追踪号后联系维护人员。"),
+}
+
+RETRYABLE_ERROR_CODES = {
+    "DRAFT_REVISION_CONFLICT",
+    "MATERIAL_LIBRARY_UNAVAILABLE",
+    "COMPILE_RECORD_MISSING",
+    "UNEXPECTED_ERROR",
 }
 
 
@@ -61,6 +85,7 @@ class ApiError(HTTPException):
         action: str | None = None,
         fields: list[dict[str, Any]] | None = None,
         context: dict[str, Any] | None = None,
+        retryable: bool | None = None,
     ) -> None:
         default_message, default_action = ERROR_MESSAGES.get(code, (message or code, None))
         detail = {
@@ -69,6 +94,7 @@ class ApiError(HTTPException):
             "action": action if action is not None else default_action,
             "fields": fields or [],
             "context": context or {},
+            "retryable": retryable if retryable is not None else code in RETRYABLE_ERROR_CODES,
         }
         super().__init__(status_code=status_code, detail=detail)
 
@@ -82,6 +108,7 @@ def api_error(
     action: str | None = None,
     fields: list[dict[str, Any]] | None = None,
     context: dict[str, Any] | None = None,
+    retryable: bool | None = None,
 ) -> ApiError:
     return ApiError(
         code,
@@ -90,6 +117,7 @@ def api_error(
         action=action,
         fields=fields,
         context=context,
+        retryable=retryable,
     )
 
 
@@ -111,6 +139,8 @@ def _payload_from_detail(detail: Any) -> tuple[ApiErrorPayload, dict[str, Any]]:
                 action=detail.get("action") if detail.get("action") is not None else default_action,
                 fields=list(detail.get("fields") or []),
                 traceId=trace_id,
+                retryable=bool(detail.get("retryable", code in RETRYABLE_ERROR_CODES)),
+                context=dict(detail.get("context") or {}),
             ),
             dict(detail.get("context") or {}),
         )
@@ -121,6 +151,8 @@ def _payload_from_detail(detail: Any) -> tuple[ApiErrorPayload, dict[str, Any]]:
             message=str(message),
             action=ERROR_MESSAGES["UNEXPECTED_ERROR"][1],
             traceId=trace_id,
+            retryable=True,
+            context={"detail": detail},
         ),
         {"detail": detail},
     )
@@ -156,6 +188,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         action=ERROR_MESSAGES["REQUEST_INVALID"][1],
         fields=fields,
         traceId=_trace_id(),
+        retryable=False,
+        context={},
     )
     return JSONResponse(
         status_code=422,

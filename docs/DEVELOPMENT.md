@@ -76,3 +76,17 @@ artifacts                      STEP/STL/计划/快照/源包
 - 多厚度材料族发布前必须具有最小、标称和最大三个已确认样例。
 - 样例材料必须通过材料族牌号、标准、表面状态、供应形态和厚度约束校验。
 - `reference` 每次解析材料库当前记录并检测漂移；`copy` 使用冻结快照以保证回归可复现。
+
+## 第五、六阶段：确认、审计和稳定性
+
+写操作通过 `X-RuiWare-Actor`、`X-RuiWare-Source`、`X-RuiWare-Session`、`X-RuiWare-Base-Revision` 和 `X-RuiWare-Confirmed` 传递统一上下文。旧 GUI 请求保持兼容；MCP 写载荷包含版本和确认字段时由客户端自动补充 Agent/MCP 标识。
+
+Repository 使用 SQLite 事务锁保护 revision 检查，审计记录写入 `operation_audit` 表。审计可通过 `GET /api/v1/audit-logs` 或 MCP `ruiware_get_audit_log` 查询；回滚通过 `POST /api/v1/template-drafts/{draftId}/rollback` 或 `ruiware_rollback_draft` 生成新 revision。
+
+MCP 客户端只对连接错误和可重试的 5xx 进行最多两次退避重试，409 版本冲突、422 校验错误和默认非幂等写入不会重试。验证命令：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+npm --prefix apps/studio-web run test
+npm --prefix apps/studio-web run build
+```
