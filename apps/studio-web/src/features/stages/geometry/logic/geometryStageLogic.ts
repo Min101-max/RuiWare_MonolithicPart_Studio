@@ -24,7 +24,7 @@ export const SOURCE_LABELS: Record<ParameterSource["type"], string> = {
   constant: "模板常量",
 };
 export const OPERATORS = [
-  ["profile.open_profile_tube_extrude", "开口型材与管材拉伸", "available"],
+  ["profile.open_profile_tube_extrude", "开口型材/管材拉伸", "available"],
   ["sheet.blank_extrude", "板坯拉伸", "available"],
   ["solid.revolve", "旋转体", "available"],
   ["solid.sweep", "路径扫掠", "available"],
