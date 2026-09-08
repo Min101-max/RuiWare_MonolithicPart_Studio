@@ -18,7 +18,7 @@ SERVER_INFO = {
 TOOL_CONTRACTS = {
     "ruiware_get_audit_log": {"required": (), "read_only": True},
     "ruiware_rollback_draft": {"required": ("draftId", "targetRevision", "baseRevision", "confirmed"), "read_only": False},
-    "create_template": {"required": ("name",), "read_only": False},
+    "create_template": {"required": ("name", "confirmed"), "read_only": False},
     "ruiware_get_draft_context": {
         "required": ("draftId",),
         "read_only": True,
@@ -36,14 +36,14 @@ TOOL_CONTRACTS = {
         "read_only": True,
     },
     "ruiware_submit_proposal": {
-        "required": ("draftId", "proposal"),
+        "required": ("draftId", "proposal", "baseRevision", "confirmed"),
         "read_only": False,
     },
     "ruiware_get_validation_result": {
         "required": ("draftId", "stage"),
         "read_only": True,
     },
-    "ruiware_compile_draft": {"required": ("draftId",), "read_only": False},
+    "ruiware_compile_draft": {"required": ("draftId", "baseRevision", "confirmed"), "read_only": False},
     "ruiware_get_latest_compile": {"required": ("draftId",), "read_only": True},
     "ruiware_check_brep": {"required": ("draftId",), "read_only": True},
     "ruiware_get_compile_artifacts": {"required": ("draftId",), "read_only": True},
@@ -55,7 +55,7 @@ TOOL_CONTRACTS = {
     "ruiware_preview_parameter_changes": {"required": ("draftId", "baseRevision", "changes"), "read_only": True},
     "ruiware_apply_parameter_changes": {"required": ("draftId", "baseRevision", "changes", "confirmed"), "read_only": False},
     "ruiware_explain_error": {"required": ("error",), "read_only": True},
-    "ruiware_complete_stage": {"required": ("draftId", "stage"), "read_only": False},
+    "ruiware_complete_stage": {"required": ("draftId", "stage", "baseRevision", "confirmed"), "read_only": False},
     "ruiware_get_current_draft_status": {"required": (), "read_only": True},
     "ruiware_preview_sketch_edit": {"required": ("draftId", "baseRevision", "changes"), "read_only": True},
     "ruiware_apply_sketch_edit": {"required": ("draftId", "baseRevision", "changes", "confirmed"), "read_only": False},
@@ -64,5 +64,5 @@ TOOL_CONTRACTS = {
     "ruiware_search_materials": {"required": (), "read_only": True},
     "ruiware_plan_task": {"required": ("draftId", "task"), "read_only": True},
     "ruiware_execute_task": {"required": ("draftId", "task", "baseRevision", "confirmed"), "read_only": False},
-    "ruiware_publish_template": {"required": ("draftId",), "read_only": False},
+    "ruiware_publish_template": {"required": ("draftId", "baseRevision", "confirmed"), "read_only": False},
 }

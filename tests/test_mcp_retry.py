@@ -99,3 +99,23 @@ def test_mcp_write_payload_gets_agent_context_headers(monkeypatch):
     assert seen[0]["X-ruiware-actor"] == "agent"
     assert seen[0]["X-ruiware-source"] == "mcp"
     assert seen[0]["X-ruiware-base-revision"] == "3"
+
+
+def test_all_mcp_mutations_get_agent_identity_even_without_guard_fields(monkeypatch):
+    seen = []
+
+    def opener(request, timeout):
+        seen.append((request.method, dict(request.headers)))
+        return _Response({"ok": True})
+
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+    client = RuiWareApiClient("http://api", sleep_fn=lambda _: None)
+
+    client.post("/template-drafts/draft-1/compile", {}, headers={"X-Request-Id": "request-1"})
+    client.put("/workspace/current-draft", {"draftId": "draft-1"})
+
+    assert seen[0][1]["X-ruiware-actor"] == "agent"
+    assert seen[0][1]["X-ruiware-source"] == "mcp"
+    assert seen[0][1]["X-request-id"] == "request-1"
+    assert seen[1][1]["X-ruiware-actor"] == "agent"
+    assert seen[1][1]["X-ruiware-source"] == "mcp"

@@ -10,7 +10,7 @@ from template_core.sketch_solver import solve_semantic_sketch
 
 from ..errors import api_error
 from ..repository import DuplicateCodeError, Repository
-from ._common import ALLOWED_ATTACHMENT_EXTENSIONS, AttachmentUpdateRequestBody, attachment_target_path, draft_or_404, next_template_code, now, save_draft
+from ._common import ALLOWED_ATTACHMENT_EXTENSIONS, AttachmentUpdateRequestBody, attachment_target_path, draft_or_404, ensure_draft_revision, next_template_code, now, save_draft
 from .proposal import sync_sketch_seed_coordinates
 from .context import validate_stage_with_context
 from .write_context import WriteContext
@@ -127,13 +127,24 @@ def validate_template_stage(repository: Repository, stage: StageName, draft: Tem
     return validate_stage_with_context(repository, stage, draft)
 
 
-def complete_template_stage(repository: Repository, stage: StageName, draft_id: str) -> tuple[TemplateDraft, StageValidation]:
+def complete_template_stage(
+    repository: Repository,
+    stage: StageName,
+    draft_id: str,
+    expected_revision: int | None = None,
+) -> tuple[TemplateDraft, StageValidation]:
     draft = draft_or_404(repository, draft_id)
+    ensure_draft_revision(draft, expected_revision)
     validation = validate_template_stage(repository, stage, draft)
     if not validation.complete:
         return draft, validation
     stage_status = draft.stageStatus.model_copy(update={stage: "complete"})
-    completed = save_draft(repository, draft.model_copy(update={"stageStatus": stage_status}), reason=f"complete-{stage}")
+    completed = save_draft(
+        repository,
+        draft.model_copy(update={"stageStatus": stage_status}),
+        reason=f"complete-{stage}",
+        expected_revision=expected_revision,
+    )
     return completed, validation
 
 

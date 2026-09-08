@@ -11,7 +11,10 @@ from ...core.responses import tool_result
 def execute(client: RuiWareApiClient, arguments: dict[str, Any]) -> dict[str, Any]:
     """执行模板 CAD 编译并记录结果。"""
     draft_id = arguments.get("draftId", "")
-    return tool_result(client.post(f"/template-drafts/{draft_id}/compile", {}))
+    return tool_result(client.post(f"/template-drafts/{draft_id}/compile", {
+        "baseRevision": arguments["baseRevision"],
+        "confirmed": arguments["confirmed"],
+    }))
 
 
 def latest(client: RuiWareApiClient, arguments: dict[str, Any]) -> dict[str, Any]:

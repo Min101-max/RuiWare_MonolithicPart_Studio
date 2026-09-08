@@ -16,8 +16,8 @@ ADDITIONAL_TOOLS = [
     },
     {
         "name": "create_template",
-        "description": "按名称幂等创建空白模板并将其选为 GUI 当前零部件。",
-        "inputSchema": {"type": "object", "required": ["name"], "properties": {"name": {"type": "string"}}},
+        "description": "经用户确认后，按名称幂等创建空白模板并将其选为 GUI 当前零部件。",
+        "inputSchema": {"type": "object", "required": ["name", "confirmed"], "properties": {"name": {"type": "string"}, "confirmed": {"type": "boolean"}}},
     },
     {
         "name": "ruiware_get_current_draft_status",
@@ -26,8 +26,8 @@ ADDITIONAL_TOOLS = [
     },
     {
         "name": "ruiware_compile_draft",
-        "description": "执行指定模板的 CAD 编译并返回 B-Rep 检查结果和导出产物；会产生编译记录，但不修改模板定义。",
-        "inputSchema": {"type": "object", "required": ["draftId"], "properties": {"draftId": {"type": "string"}}},
+        "description": "经用户确认且修订未变化时执行 CAD 编译，并返回 B-Rep 检查结果和导出产物。",
+        "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "confirmed"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer", "minimum": 1}, "confirmed": {"type": "boolean"}}},
     },
     {
         "name": "ruiware_get_latest_compile",
@@ -87,7 +87,7 @@ ADDITIONAL_TOOLS = [
     {
         "name": "ruiware_complete_stage",
         "description": "在确定性校验通过后将指定阶段标记为完成；会修改草稿状态，仅在用户明确确认后调用。",
-        "inputSchema": {"type": "object", "required": ["draftId", "stage"], "properties": {"draftId": {"type": "string"}, "stage": {"type": "string", "enum": ["templateInfo", "material", "baseSketch", "features", "variants", "review", "admission"]}}},
+        "inputSchema": {"type": "object", "required": ["draftId", "stage", "baseRevision", "confirmed"], "properties": {"draftId": {"type": "string"}, "stage": {"type": "string", "enum": ["templateInfo", "material", "baseSketch", "features", "variants", "review", "admission"]}, "baseRevision": {"type": "integer", "minimum": 1}, "confirmed": {"type": "boolean"}}},
     },
     {"name": "ruiware_preview_sketch_edit", "description": "预览草图图元、约束、区域和设置修改，返回求解结果与几何阶段校验；不保存修改。", "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "changes"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer"}, "changes": {"type": "object"}}}},
     {"name": "ruiware_apply_sketch_edit", "description": "在用户确认且修订未变化时写入草图修改，并重新求解和校验。", "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "changes", "confirmed"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer"}, "changes": {"type": "object"}, "confirmed": {"type": "boolean"}}}},
@@ -96,5 +96,5 @@ ADDITIONAL_TOOLS = [
     {"name": "ruiware_search_materials", "description": "按关键词和材料要求查询并匹配材料库记录；不修改平台数据。", "inputSchema": {"type": "object", "properties": {"search": {"type": "string"}, "limit": {"type": "integer"}, "requirement": {"type": "object"}}}},
     {"name": "ruiware_plan_task", "description": "根据目标生成当前模板的可执行任务计划；不修改平台数据。", "inputSchema": {"type": "object", "required": ["draftId", "task"], "properties": {"draftId": {"type": "string"}, "task": {"enum": ["completeCurrentStage", "fixCurrentErrors", "prepareCadCompile", "checkPublishReadiness"]}}}},
     {"name": "ruiware_execute_task", "description": "执行已预览并确认的目标任务；要求 baseRevision 和 confirmed=true。修复任务通过 input 指定参数、草图或材料修复。", "inputSchema": {"type": "object", "required": ["draftId", "task", "baseRevision", "confirmed"], "properties": {"draftId": {"type": "string"}, "task": {"enum": ["completeCurrentStage", "fixCurrentErrors", "prepareCadCompile", "checkPublishReadiness"]}, "baseRevision": {"type": "integer"}, "confirmed": {"type": "boolean"}, "input": {"type": "object"}}}},
-    {"name": "ruiware_publish_template", "description": "发布已通过准入校验和 CAD 编译的模板；仅在用户明确确认后调用。", "inputSchema": {"type": "object", "required": ["draftId"], "properties": {"draftId": {"type": "string"}}}},
+    {"name": "ruiware_publish_template", "description": "发布已通过准入校验和 CAD 编译的模板；要求用户确认且草稿修订未变化。", "inputSchema": {"type": "object", "required": ["draftId", "baseRevision", "confirmed"], "properties": {"draftId": {"type": "string"}, "baseRevision": {"type": "integer", "minimum": 1}, "confirmed": {"type": "boolean"}}}},
 ]
