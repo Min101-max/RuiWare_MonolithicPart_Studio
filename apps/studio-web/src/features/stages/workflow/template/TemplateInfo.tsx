@@ -3,6 +3,7 @@ import { ArrowRight, Box, CheckCircle2, CircleAlert, ClipboardCheck, FileImage, 
 import { api } from "../../../../api";
 import { Field, NumberInput, PanelTitle } from "../../../../components/ui/FormParts";
 import type { Draft, GeometryRecipe, MaterialValidationSample, TemplateAuthoringRegistry } from "../../../../types";
+import { clearDanglingSemanticFaceLocators } from "../../geometry/logic/geometryStageLogic";
 
 type TemplateInfoProps = {
   draft: Draft;
@@ -81,25 +82,30 @@ export function TemplateInfo({
       drivingParameters: profileParameters,
       constraintsReviewed: false,
     };
-    change({
-      ...draft,
-      geometryPrototypeId: prototypeId,
-      sketch:
-        prototypeId === "prototype.closedProfile" ||
-        prototypeId === "prototype.openThinWallProfile"
-          ? profileModeSketch(
-              sketch.profileMode,
-              sketch,
-              semanticParameterIds(draft),
-            )
-          : sketch,
-      geometryRecipe: {
+    const nextSketch =
+      prototypeId === "prototype.closedProfile" ||
+      prototypeId === "prototype.openThinWallProfile"
+        ? profileModeSketch(
+            sketch.profileMode,
+            sketch,
+            semanticParameterIds(draft),
+          )
+        : sketch;
+    const nextRecipe = clearDanglingSemanticFaceLocators(
+      {
         ...draft.geometryRecipe,
         constructionMode:
           prototype.constructionMode as GeometryRecipe["constructionMode"],
         operations: [operation, ...draft.geometryRecipe.operations.slice(1)],
         reviewed: false,
       },
+      nextSketch,
+    );
+    change({
+      ...draft,
+      geometryPrototypeId: prototypeId,
+      sketch: nextSketch,
+      geometryRecipe: nextRecipe,
     });
   };
   return (

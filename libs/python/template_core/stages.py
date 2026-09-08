@@ -128,6 +128,212 @@ def _validate_geometry_sketch_path_references(draft: TemplateDraft) -> tuple[boo
     return True, "截面草图与扫掠路径引用完整"
 
 
+def _validate_semantic_face_locators(draft: TemplateDraft) -> tuple[bool, str]:
+    """Check authored semantic-face sources without consulting CAD topology.
+
+    A locator is deliberately optional so drafts written before the locator
+    contract remain readable and valid.  When present, its source ID is
+    checked against the semantic sketch entity/region collections, while its
+    operation and profile sketch IDs are checked against authored recipe
+    references.  No B-Rep face ordering is involved here.
+    """
+
+    operations = {item.id: item for item in draft.geometryRecipe.operations}
+    recipe_sketches = set(draft.geometryRecipe.sketches)
+    entities_by_id: dict[str, list[Any]] = {}
+    for entity in draft.sketch.entities:
+        entities_by_id.setdefault(entity.id, []).append(entity)
+    regions_by_id: dict[str, list[Any]] = {}
+    for region in draft.sketch.regions:
+        regions_by_id.setdefault(region.id, []).append(region)
+    supported_operators = {
+        "profile.open_profile_tube_extrude",
+        "sketch.region_extrude",
+    }
+    errors: list[str] = []
+
+    for face in draft.geometryRecipe.semanticFaces:
+        locator = face.locator
+        if locator is None:
+            continue
+        path = f"geometryRecipe.semanticFaces.{face.id}.locator"
+        operation = operations.get(locator.operationId)
+        if operation is None:
+            errors.append(f"{path}.operationId 引用了不存在的几何操作 {locator.operationId}")
+            continue
+        if locator.kind not in {"profileEdge", "profileRegion"}:
+            errors.append(
+                f"{path}.kind 必须是 profileEdge 或 profileRegion：{locator.kind}"
+            )
+            continue
+        if operation.operator not in supported_operators:
+            errors.append(
+                f"{path}.operationId 仅支持来源于拉伸算子 "
+                "profile.open_profile_tube_extrude 或 sketch.region_extrude"
+            )
+
+        if locator.profileSketchId not in recipe_sketches:
+            errors.append(
+                f"{path}.profileSketchId 引用了未声明的截面草图 {locator.profileSketchId}"
+            )
+        if operation.profileSketchId is not None and operation.profileSketchId != locator.profileSketchId:
+            errors.append(
+                f"{path}.profileSketchId 与几何操作 {operation.id} 的 profileSketchId 不一致"
+            )
+        if locator.profileSketchId not in set(operation.sourceRefs):
+            errors.append(
+                f"{path}.profileSketchId 必须被几何操作 {operation.id} 的 sourceRefs 引用"
+            )
+        if face.sourceOperationId != locator.operationId:
+            errors.append(
+                f"{path}.operationId 与语义面 {face.id} 的 sourceOperationId 不一致"
+            )
+
+        if locator.kind == "profileEdge":
+            entities = entities_by_id.get(locator.sourceEntityId, [])
+            if not entities:
+                errors.append(
+                    f"{path}.sourceEntityId 必须引用已有草图实体：{locator.sourceEntityId}"
+                )
+            elif len(entities) != 1:
+                errors.append(
+                    f"{path}.sourceEntityId 必须唯一引用一个草图实体：{locator.sourceEntityId}"
+                )
+            else:
+                entity = entities[0]
+                if entity.construction or entity.geometryType == "point":
+                    errors.append(
+                        f"{path}.sourceEntityId 必须引用非构造且非点的截面轮廓边：{locator.sourceEntityId}"
+                    )
+        else:
+            regions = regions_by_id.get(locator.sourceEntityId, [])
+            if not regions:
+                errors.append(
+                    f"{path}.sourceEntityId 必须引用已有草图区域：{locator.sourceEntityId}"
+                )
+            elif len(regions) != 1:
+                errors.append(
+                    f"{path}.sourceEntityId 必须唯一引用一个草图区域：{locator.sourceEntityId}"
+                )
+            elif not regions[0].closed:
+                errors.append(
+                    f"{path}.sourceEntityId 必须引用闭合截面区域：{locator.sourceEntityId}"
+                )
+
+    return not errors, "；".join(errors) or "语义面来源定位器引用完整"
+
+
+def _validate_semantic_face_locator_cases(
+    draft: TemplateDraft,
+    sketch_solution: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """Check locator sources in the minimum, nominal and maximum sketch cases."""
+
+    solution = sketch_solution or solve_semantic_sketch(draft)
+    operations = {item.id: item for item in draft.geometryRecipe.operations}
+    recipe_sketches = set(draft.geometryRecipe.sketches)
+    errors: list[str] = []
+    supported_operators = {
+        "profile.open_profile_tube_extrude",
+        "sketch.region_extrude",
+    }
+    for case in solution.get("cases", []):
+        case_name = case.get("case", "unknown")
+        primitives = {
+            item.get("id"): item
+            for item in case.get("primitives", [])
+            if item.get("id")
+        }
+        regions = {
+            item.get("id"): item
+            for item in case.get("regions", [])
+            if item.get("id")
+        }
+        boundary_uses: dict[str, int] = {}
+        for region in case.get("regions", []):
+            for source_id in region.get("boundaryRefs", []):
+                boundary_uses[source_id] = boundary_uses.get(source_id, 0) + 1
+        for face in draft.geometryRecipe.semanticFaces:
+            locator = face.locator
+            if locator is None:
+                continue
+            path = f"geometryRecipe.semanticFaces.{face.id}.locator"
+            operation = operations.get(locator.operationId)
+            if operation is None:
+                errors.append(
+                    f"[{case_name}] {path}.operationId 来源操作不存在：{locator.operationId}"
+                )
+                continue
+            if locator.kind not in {"profileEdge", "profileRegion"}:
+                errors.append(
+                    f"[{case_name}] {path}.kind 必须是 profileEdge 或 profileRegion："
+                    f"{locator.kind}"
+                )
+                continue
+            if operation.operator not in supported_operators:
+                errors.append(
+                    f"[{case_name}] {path}.operationId 来源操作无法解析："
+                    f"仅支持拉伸算子（{operation.operator}）"
+                )
+                continue
+            if (
+                locator.profileSketchId not in recipe_sketches
+            ):
+                errors.append(
+                    f"[{case_name}] {path}.profileSketchId 来源截面草图不存在："
+                    f"{locator.profileSketchId}"
+                )
+                continue
+            if operation.profileSketchId and operation.profileSketchId != locator.profileSketchId:
+                errors.append(
+                    f"[{case_name}] {path}.profileSketchId 与来源操作不一致："
+                    f"{locator.profileSketchId}"
+                )
+                continue
+            if locator.profileSketchId not in set(operation.sourceRefs):
+                errors.append(
+                    f"[{case_name}] {path}.profileSketchId 未被来源操作引用："
+                    f"{locator.profileSketchId}"
+                )
+                continue
+            if locator.kind == "profileEdge":
+                primitive = primitives.get(locator.sourceEntityId)
+                if primitive is None or primitive.get("construction"):
+                    errors.append(
+                        f"[{case_name}] {path}.sourceEntityId 来源边不存在：{locator.sourceEntityId}"
+                    )
+                    continue
+                if primitive.get("type") != "line":
+                    errors.append(
+                        f"[{case_name}] {path}.sourceEntityId 来源边无法生成面："
+                        f"当前仅支持直线轮廓边（{locator.sourceEntityId}）"
+                    )
+                    continue
+                if boundary_uses.get(locator.sourceEntityId, 0) == 0:
+                    errors.append(
+                        f"[{case_name}] {path}.sourceEntityId 来源边无法生成面："
+                        f"未参与闭合材料区域（{locator.sourceEntityId}）"
+                    )
+                elif boundary_uses[locator.sourceEntityId] > 1:
+                    errors.append(
+                        f"[{case_name}] {path} 一个定位器命中多个面："
+                        f"{locator.sourceEntityId} 出现在多个区域边界"
+                    )
+            else:
+                region = regions.get(locator.sourceEntityId)
+                if region is None:
+                    errors.append(
+                        f"[{case_name}] {path}.sourceEntityId 来源区域不存在：{locator.sourceEntityId}"
+                    )
+                elif not region.get("closed") or region.get("operation") != "add":
+                    errors.append(
+                        f"[{case_name}] {path}.sourceEntityId 来源区域无法生成面："
+                        f"必须是闭合加材区域（{locator.sourceEntityId}）"
+                    )
+
+    return not errors, "；".join(errors) or "最小、标称和最大工况的语义面来源均可唯一解析"
+
+
 def sweep_preview_admission(draft: TemplateDraft, material_snapshot: dict[str, Any] | None = None) -> list[dict[str, str]]:
     """Return blocking diagnostics before any 3-D preview/CAD work starts."""
     operations = [item for item in draft.geometryRecipe.operations if item.operator == "solid.sweep"]
@@ -329,6 +535,10 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
         else:
             sweep_path_ok = all("pathPoints" in (set(item.arguments) | set(item.argumentExpressions)) for item in sweep_operations)
             sweep_path_message = "使用算子内置路径点" if sweep_path_ok else "路径扫掠需要一条已确认的扫掠路径"
+    locator_ok, locator_message = _validate_semantic_face_locators(draft)
+    locator_cases_ok, locator_cases_message = _validate_semantic_face_locator_cases(
+        draft, sketch_solution
+    )
     checks = [
         StageCheck(id="driving-parameters", label="几何驱动参数完整", passed=expressions_valid, severity="error", path="geometryRecipe.operations", message=f"几何配方表达式无效，或引用了未声明参数：{', '.join(sorted(missing)) or '请检查表达式语法'}。草图驱动参数只需包含轮廓自身使用的参数。"),
         StageCheck(id="semantic-entities", label="语义图元契约完整", passed=semantic_entities_ok, severity="error", path="sketch.entities", message="请为草图图元定义稳定语义名称，并只引用已声明参数。"),
@@ -343,6 +553,8 @@ def validate_base_sketch(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="geometry-operators-supported", label="几何算子均已实现", passed=operators_supported, severity="error", path="geometryRecipe.operations", message="当前配方包含CAD内核尚未实现的算子。"),
         StageCheck(id="geometry-operator-inputs", label="几何算子输入完整", passed=operator_inputs_ok, severity="error", path="geometryRecipe.operations", message="；".join(operator_input_messages) or "算子输入完整。"),
         StageCheck(id="geometry-sketch-path-references", label="截面与路径草图引用完整", passed=reference_ok, severity="error", path="geometryRecipe", message=reference_message),
+        StageCheck(id="semantic-face-locators", label="语义面来源定位器引用有效", passed=locator_ok, severity="error", path="geometryRecipe.semanticFaces", message=locator_message),
+        StageCheck(id="semantic-face-locator-cases", label="语义面来源三工况可解析", passed=locator_cases_ok, severity="error", path="geometryRecipe.semanticFaces", message=locator_cases_message),
         StageCheck(id="sweep-path", label="扫掠路径已定义", passed=sweep_path_ok, severity="error", path="sweepPath", message=sweep_path_message),
         StageCheck(id="geometry-reviewed", label="基础几何配方已确认", passed=draft.geometryRecipe.reviewed, severity="error", path="geometryRecipe.reviewed", message="请人工确认基础几何的构造方式和语义输出。"),
         StageCheck(id="geometry-expressions-id-only", label="几何表达式仅使用参数ID", passed=not base_sketch_alias_violations, severity="error", path="geometryRecipe", message=_alias_violation_message(base_sketch_alias_violations) or "几何表达式仅可使用参数稳定 ID。"),
@@ -383,10 +595,14 @@ def validate_features(draft: TemplateDraft) -> StageValidation:
         interfaces=draft.interfaces,
     )
     rule_ok = not any(item.severity == "error" for item in evaluation.diagnostics)
+    locator_ok, locator_message = _validate_semantic_face_locators(draft)
+    locator_cases_ok, locator_cases_message = _validate_semantic_face_locator_cases(draft)
     checks = [
         StageCheck(id="feature-review", label="制造特征规则已确认", passed=draft.featureRulesReviewed, severity="error", path="featureRulesReviewed", message="即使零件没有制造特征，也需确认规则集合为空。"),
         StageCheck(id="feature-count", label="制造特征规则已建立", passed=len(draft.featureRules) > 0, severity="warning", path="featureRules", message="当前为无制造特征零件。"),
         StageCheck(id="feature-rules", label="制造特征规则可求值", passed=rule_ok, severity="error", path="featureRules", message="特征数量、条件或坐标表达式无法安全求值。"),
+        StageCheck(id="semantic-face-locators", label="语义面来源定位器引用有效", passed=locator_ok, severity="error", path="geometryRecipe.semanticFaces", message=locator_message),
+        StageCheck(id="semantic-face-locator-cases", label="语义面来源三工况可解析", passed=locator_cases_ok, severity="error", path="geometryRecipe.semanticFaces", message=locator_cases_message),
         StageCheck(id="feature-expressions-id-only", label="规则表达式仅使用参数ID", passed=not feature_alias_violations, severity="error", path="featureRules", message=_alias_violation_message(feature_alias_violations) or "规则表达式仅可使用参数稳定 ID。"),
         StageCheck(id="resolved-rule-set", label="规则解析结果已检查", passed=not draft.featureRules or len(evaluation.features) > 0, severity="warning", path="featureRules", message="当前标称参数下，特征规则生成了空集合。"),
     ]

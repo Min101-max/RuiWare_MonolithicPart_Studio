@@ -17,6 +17,7 @@ import {
 } from "../../../sketch/sketchAuthoringCore";
 import { applyCenterlineThinwallOffset } from "../../../sketch/sketchThinwallOffset";
 import { normalizeSketchNumbers } from "../../../sketch/sketchNumberNormalization";
+import { clearDanglingSemanticFaceLocators } from "../logic/geometryStageLogic";
 
 type SketchSolveResult = Awaited<ReturnType<typeof api.solveSketch>>;
 type SketchTool = "select" | "point" | "line" | "polyline" | "rectangle" | "circle" | "arc";
@@ -44,6 +45,12 @@ type SketchEditConflict = {
     constraintType: string;
   }[];
   sharedParameterIds: string[];
+};
+
+type GeometryEditSnapshot = {
+  sketch: Draft["sketch"];
+  parameterDefinitions: ParameterDefinition[];
+  semanticFaces: Draft["geometryRecipe"]["semanticFaces"];
 };
 
 const STRONG_CONSTRAINT_TYPES = new Set(["coincident", "closed"]);
@@ -313,12 +320,8 @@ export const useGeometryEditFlow = ({
     draft.sketch.entities[0]?.id ? [draft.sketch.entities[0].id] : [],
   );
   const [tool, setTool] = useState<SketchTool>("select");
-  const [history, setHistory] = useState<
-    { sketch: Draft["sketch"]; parameterDefinitions: ParameterDefinition[] }[]
-  >([]);
-  const [future, setFuture] = useState<
-    { sketch: Draft["sketch"]; parameterDefinitions: ParameterDefinition[] }[]
-  >([]);
+  const [history, setHistory] = useState<GeometryEditSnapshot[]>([]);
+  const [future, setFuture] = useState<GeometryEditSnapshot[]>([]);
   const [solving, setSolving] = useState(false);
   const [solveError, setSolveError] = useState<string | null>(null);
   const [viewCommand, setViewCommand] = useState<SketchViewCommand>(null);
@@ -430,6 +433,7 @@ export const useGeometryEditFlow = ({
         {
           sketch: draft.sketch,
           parameterDefinitions: draft.parameterDefinitions,
+          semanticFaces: draft.geometryRecipe.semanticFaces,
         },
       ].slice(-40),
     );
@@ -438,25 +442,41 @@ export const useGeometryEditFlow = ({
 
   const applySketch = (sketch: Draft["sketch"]) => {
     setSolution(null);
+    const nextSketch = {
+      ...normalizeSketchNumbers(normalizeSketchTopology(sketch)),
+      constraintsReviewed: false,
+    };
     change({
       ...draft,
-      sketch: {
-        ...normalizeSketchNumbers(normalizeSketchTopology(sketch)),
-        constraintsReviewed: false,
-      },
+      sketch: nextSketch,
+      geometryRecipe: clearDanglingSemanticFaceLocators(
+        draft.geometryRecipe,
+        nextSketch,
+      ),
     });
   };
 
   const applyGeometryEdit = (patch: {
     sketch: Draft["sketch"];
     parameterDefinitions?: ParameterDefinition[];
+    semanticFaces?: Draft["geometryRecipe"]["semanticFaces"];
   }) => {
     setSolution(null);
+    const nextSketch = {
+      ...normalizeSketchNumbers(normalizeSketchTopology(patch.sketch)),
+      constraintsReviewed: false,
+    };
     change({
       ...draft,
-      sketch: {
-        ...normalizeSketchNumbers(normalizeSketchTopology(patch.sketch)),
-        constraintsReviewed: false,
+      sketch: nextSketch,
+      geometryRecipe: {
+        ...draft.geometryRecipe,
+        semanticFaces:
+          patch.semanticFaces ||
+          clearDanglingSemanticFaceLocators(
+            draft.geometryRecipe,
+            nextSketch,
+          ).semanticFaces,
       },
       ...(patch.parameterDefinitions
         ? { parameterDefinitions: patch.parameterDefinitions }
@@ -572,6 +592,7 @@ export const useGeometryEditFlow = ({
         {
           sketch: draft.sketch,
           parameterDefinitions: draft.parameterDefinitions,
+          semanticFaces: draft.geometryRecipe.semanticFaces,
         },
         ...items,
       ].slice(0, 40),
@@ -590,6 +611,7 @@ export const useGeometryEditFlow = ({
         {
           sketch: draft.sketch,
           parameterDefinitions: draft.parameterDefinitions,
+          semanticFaces: draft.geometryRecipe.semanticFaces,
         },
       ].slice(-40),
     );

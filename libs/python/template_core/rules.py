@@ -5,9 +5,12 @@ import math
 from collections import defaultdict, deque
 from typing import Any, Mapping
 
+from pydantic import ValidationError
+
 from .metamodel import (
     EvaluationDiagnostic,
     SemanticFaceDefinition,
+    SemanticFaceLocator,
     FeatureRule,
     ParameterDefinition,
     PartInterface,
@@ -20,6 +23,12 @@ from .metamodel import (
 
 class RuleEvaluationError(ValueError):
     pass
+
+
+class _SemanticFaceLocatorEvaluationError(RuleEvaluationError):
+    def __init__(self, face_id: str, message: str):
+        super().__init__(message)
+        self.face_id = face_id
 
 
 _FUNCTIONS = {
@@ -268,11 +277,40 @@ def resolve_parameters(
 _DEFAULT_SEMANTIC_FACES = [SemanticFaceDefinition(id="part.face.front", label="前侧面", hostFrame="negativeY")]
 
 
+def _validated_face_locator(face: SemanticFaceDefinition) -> SemanticFaceLocator | None:
+    """Revalidate mutable model instances before they enter resolved output."""
+
+    if face.locator is None:
+        return None
+    try:
+        return SemanticFaceLocator.model_validate(face.locator.model_dump())
+    except (AttributeError, TypeError, ValidationError, ValueError) as error:
+        raise _SemanticFaceLocatorEvaluationError(
+            face.id,
+            f"semantic face {face.id} has an invalid source locator: {error}",
+        ) from error
+
+
+def _try_resolve_face_bound(expression: str, context: Mapping[str, Any]) -> float | None:
+    """Best-effort U/V metadata resolution that cannot make legacy single rules fail."""
+
+    try:
+        value = evaluate_expression(expression, context)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        resolved = float(value)
+        return resolved if math.isfinite(resolved) else None
+    except (ArithmeticError, TypeError, ValueError):
+        return None
+
+
 def resolve_feature_rules(
     rules: list[FeatureRule], context: Mapping[str, Any], semantic_faces: list[SemanticFaceDefinition] | None = None,
 ) -> tuple[list[ResolvedFeature], list[EvaluationDiagnostic]]:
     features: list[ResolvedFeature] = []
     diagnostics: list[EvaluationDiagnostic] = []
+    compatibility_diagnostics: list[EvaluationDiagnostic] = []
+    warned_missing_locators: set[str] = set()
     faces = {item.id: item for item in (semantic_faces or _DEFAULT_SEMANTIC_FACES)}
     for rule in sorted((item for item in rules if item.enabled), key=lambda item: item.id):
         path = f"featureRules.{rule.id}"
@@ -300,6 +338,22 @@ def resolve_feature_rules(
                 if face is None:
                     raise RuleEvaluationError(f"semantic face not found: {binding.semanticFaceId}")
                 face_context = {**context, **dimensions}
+                locator = _validated_face_locator(face)
+                if locator is None and face.id not in warned_missing_locators:
+                    compatibility_diagnostics.append(EvaluationDiagnostic(
+                        severity="warning",
+                        code="SEMANTIC_FACE_LOCATOR_MISSING",
+                        path=f"geometryRecipe.semanticFaces.{face.id}.locator",
+                        message=(
+                            f"Semantic face {face.id} has no source locator; "
+                            "legacy host-frame behavior remains active."
+                        ),
+                    ))
+                    warned_missing_locators.add(face.id)
+                resolved_u_start = _try_resolve_face_bound(face.uStartExpression, face_context)
+                resolved_u_span = _try_resolve_face_bound(face.uSpanExpression, face_context)
+                resolved_v_start = _try_resolve_face_bound(face.vStartExpression, face_context)
+                resolved_v_span = _try_resolve_face_bound(face.vSpanExpression, face_context)
                 axis_start = 0.0
                 usable_span = 0.0
                 if placement.mode in {"linearArray", "equalSpan", "maxPitch"}:
@@ -362,13 +416,25 @@ def resolve_feature_rules(
                     features.append(ResolvedFeature(
                         id=f"{rule.id}.{binding.semanticFaceId.replace('.', '_')}.{index + 1:03d}", featureType=rule.featureType,
                         arguments=arguments, semanticFaceId=face.id, hostFace=face.hostFrame,
+                        locator=locator,
+                        resolvedSourceEntityId=locator.sourceEntityId if locator is not None else None,
+                        resolvedUStart=resolved_u_start, resolvedUSpan=resolved_u_span,
+                        resolvedVStart=resolved_v_start, resolvedVSpan=resolved_v_span,
                         polygonVertices=vertices, sourceRuleId=rule.id, index=index,
                     ))
+        except _SemanticFaceLocatorEvaluationError as error:
+            diagnostics.append(EvaluationDiagnostic(
+                severity="error",
+                code="SEMANTIC_FACE_LOCATOR_INVALID",
+                path=f"geometryRecipe.semanticFaces.{error.face_id}.locator",
+                message=str(error),
+            ))
         except RuleEvaluationError as error:
             diagnostics.append(EvaluationDiagnostic(severity="error", code="FEATURE_RULE_EVALUATION_FAILED", path=path, message=str(error)))
     ids = [item.id for item in features]
     if len(ids) != len(set(ids)):
         diagnostics.append(EvaluationDiagnostic(severity="error", code="RESOLVED_FEATURE_ID_DUPLICATE", path="featureRules", message="resolved feature IDs are not unique"))
+    diagnostics.extend(compatibility_diagnostics)
     return features, diagnostics
 
 
