@@ -53,6 +53,16 @@ def draft_or_404(repository: Repository, draft_id: str) -> TemplateDraft:
         raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
 
 
+def ensure_draft_revision(draft: TemplateDraft, expected_revision: int | None) -> None:
+    """在执行写动作前确认 Agent 读取的草稿版本仍是当前版本。"""
+    if expected_revision is not None and draft.revision != expected_revision:
+        raise api_error(
+            "DRAFT_REVISION_CONFLICT",
+            status_code=409,
+            context={"draftId": draft.id, "expectedRevision": expected_revision, "currentRevision": draft.revision},
+        )
+
+
 def next_template_code(repository: Repository) -> str:
     index = 1
     while not repository.code_is_unique(f"RW-TPL-{index:04d}"):

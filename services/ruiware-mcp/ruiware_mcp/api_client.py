@@ -43,18 +43,16 @@ class RuiWareApiClient:
         return self._request("POST", path, payload, headers=self._context_headers(payload, headers), retry_safe=retry_safe)
 
     def put(self, path: str, payload: dict[str, Any] | None = None, *, headers: dict[str, str] | None = None, retry_safe: bool = False) -> Any:
-        return self._request("PUT", path, payload, headers=headers, retry_safe=retry_safe)
+        return self._request("PUT", path, payload, headers=self._context_headers(payload, headers), retry_safe=retry_safe)
 
     @staticmethod
-    def _context_headers(payload: dict[str, Any] | None, headers: dict[str, str] | None) -> dict[str, str] | None:
-        if headers is not None or not isinstance(payload, dict):
-            return headers
-        if "baseRevision" not in payload and "confirmed" not in payload:
-            return None
-        result = {
-            "X-RuiWare-Actor": "agent",
-            "X-RuiWare-Source": "mcp",
-        }
+    def _context_headers(payload: dict[str, Any] | None, headers: dict[str, str] | None) -> dict[str, str]:
+        protected = {"x-ruiware-actor", "x-ruiware-source", "x-ruiware-base-revision", "x-ruiware-confirmed", "x-ruiware-session"}
+        result = {key: value for key, value in (headers or {}).items() if key.lower() not in protected}
+        result["X-RuiWare-Actor"] = "agent"
+        result["X-RuiWare-Source"] = "mcp"
+        if not isinstance(payload, dict):
+            return result
         if "baseRevision" in payload:
             result["X-RuiWare-Base-Revision"] = str(payload["baseRevision"])
         if "confirmed" in payload:

@@ -195,8 +195,8 @@
 - `README.md`：MCP 服务启动方式、依赖的模板 API 和当前工具说明。
 - `pyproject.toml`：MCP 服务的 Python 包配置和 `ruiware-mcp` 启动命令。
 - `ruiware_mcp/__init__.py`：MCP Python 包标记文件。
-- `ruiware_mcp/api_client.py`：调用模板 API 的 HTTP 客户端；负责请求发送、JSON 解析和 API 错误转换。
-- `ruiware_mcp/server.py`：MCP stdio 启动入口和兼容分发入口；保留现有工具名称与业务调用方式。
+- `ruiware_mcp/api_client.py`：调用模板 API 的 HTTP 客户端；负责请求发送、JSON 解析、API 错误转换，并为所有 MCP 的 POST/PUT 请求统一附加不可被调用方覆盖的 Agent 身份与写入上下文请求头。
+- `ruiware_mcp/server.py`：MCP stdio 启动入口和兼容分发入口；按工具契约统一校验必填参数，写工具缺少 `baseRevision`、`confirmed` 或确认值不为 `true` 时不会进入业务调用。
 
 ### 6.1 MCP 核心层 `ruiware_mcp/core`
 
@@ -222,9 +222,9 @@
 - `workflow/__init__.py`：CAD、规则试算和阶段推进工具的统一导出入口。
 - `workflow/compile.py`：调用 CAD 编译、读取最近编译、提取 B-Rep 摘要和导出产物地址。
 - `workflow/evaluation.py`：调用模板规则试算接口，不保存草稿。
-- `workflow/stages.py`：调用阶段完成接口，由 API 再次校验通过后更新阶段状态。
+- `workflow/stages.py`：携带 `baseRevision` 和 `confirmed` 调用阶段完成接口，由 API 校验版本与阶段条件后更新状态。
 - `workflow/tasks.py`：调用目标任务计划和执行接口，透传 `baseRevision`、确认状态及具体修复输入。
-- `workflow/publish.py`：在发布准入通过后调用模板发布接口。
+- `workflow/publish.py`：携带 `baseRevision` 和 `confirmed`，在版本、发布准入和 CAD 编译记录均有效时调用模板发布接口。
 - `guidance/__init__.py`：Agent 指引工具的统一导出入口。
 - `guidance/parameter_help.py`：从当前草稿读取参数契约和变体覆盖，帮助 Agent 补全输入。
 - `guidance/next_actions.py`：根据阶段状态和校验结果给出下一步工具建议，不擅自修改数据。
@@ -358,7 +358,7 @@ Repository + 领域模型 + 阶段校验
 
 ### 6.9 MCP 模板创建闭环
 
-新增后端路由 `POST /api/v1/template-drafts/create`，请求至少包含 `name`，内部复用空白模板默认值、名称规范化和领域模型校验。该路由不改变既有 `/template-drafts/blank`、完整创建接口或页面数据结构。
+新增后端路由 `POST /api/v1/template-drafts/create`，GUI 请求至少包含 `name`；Agent 请求还必须包含 `confirmed=true`。内部复用空白模板默认值、名称规范化和领域模型校验，不改变既有 `/template-drafts/blank`、完整创建接口或页面数据结构。
 
 MCP 工具 `create_template` 在现有注册处暴露：先调用命名创建路由，再调用 `/api/v1/workspace/current-draft` 将创建或复用的草稿设为 GUI 当前零部件。GUI 继续使用现有工作区读取和轮询逻辑，因此无需改变当前页面即可显示 Agent 创建的模板。
 
@@ -385,13 +385,15 @@ Repository
 - GUI 和 Agent 都不能直接绕过模板 API 操作数据库，草稿统一通过 `Repository` 保存。
 - 阶段完成、参数契约、草图、材料、CAD 编译和发布均由后端及领域层再次校验，前端校验不是最终安全边界。
 - MCP 工具按只读、预览和写入能力组织；草图求解、规则试算和状态读取默认不保存草稿。
-- 提案和参数写入支持预览、用户确认和 `baseRevision`，版本过期时返回 `DRAFT_REVISION_CONFLICT`，避免旧数据静默覆盖新数据。
+- MCP 的提案提交、参数/草图/材料写入、阶段完成、任务执行、CAD 编译、发布和回滚都要求 `baseRevision` 与 `confirmed=true`；创建模板和切换 GUI 当前零部件至少要求明确确认。
+- Agent 写入的 `baseRevision` 会在后端业务执行前校验，草稿保存时继续使用 Repository 原子版本检查；版本过期统一返回 `DRAFT_REVISION_CONFLICT`，避免旧数据静默覆盖新数据。
 - GUI 通过当前 `draftId` 和 `revision` 感知 Agent 修改；无本地编辑时自动同步，有本地编辑时保留本地内容并提示冲突。
 - 统一错误响应包含错误码、处理建议、字段、追踪标识和 `retryable`，便于 GUI 和 Agent 判断是否可以重试。
 
 ### 6.11 第五、六阶段：确认、审计、并发与稳定性
 
-- `services/write_context.py` 解析 `X-RuiWare-*` 写入上下文；Agent 请求统一携带操作者、来源、会话、`baseRevision` 和确认状态，旧 GUI 请求保持兼容。
+- `services/write_context.py` 解析 `X-RuiWare-*` 写入上下文；MCP 客户端对所有 POST/PUT 请求固定标记 `actor=agent`、`source=mcp`，受保护写动作统一携带 `baseRevision` 和确认状态，旧 GUI 请求仍可沿用原请求体。
+- 提案提交、阶段完成、CAD 编译和发布在 API 路由进入业务服务时传入 Agent 的期望修订；创建模板和切换工作区因没有可用基准修订，改为强制确认但不伪造版本号。
 - `Repository.operation_audit` 记录操作、操作者、草稿前后 revision、确认状态、结果和错误；`GET /api/v1/audit-logs` 与 MCP `ruiware_get_audit_log` 提供只读查询。
 - `POST /template-drafts/{draftId}/rollback` 与 MCP `ruiware_rollback_draft` 从历史 revision 生成新 revision，不覆写历史记录。
 - `Repository.save_draft` 使用 SQLite `BEGIN IMMEDIATE` 在 revision 检查和写入之间建立原子边界；并发旧 revision 只允许一个写入成功。
@@ -400,8 +402,8 @@ Repository
 
 当前安全等级适用于本机单用户开发和受控演示环境；多人协作或公网部署前仍需完善：
 
-1. 将 `baseRevision` 校验统一覆盖所有写操作，包括材料绑定、阶段完成、编译和发布。
-2. 将用户确认从工具说明升级为服务端确认凭证，提交时同时校验提案摘要、草稿版本和确认令牌。
+1. 将当前 `confirmed=true` 布尔确认升级为一次性服务端确认凭证，提交时同时校验操作摘要、草稿版本、操作者和确认令牌。
+2. 为创建、归档、附件等尚未暴露为 MCP 工具的潜在 Agent 写动作预先定义相同的版本与确认规则。
 3. 将全局 `workspace_context` 升级为按用户、会话或工作区隔离，避免不同用户共享当前零部件选择。
 4. 增加 GUI、Agent、用户和工具维度的身份授权，区分查询、编辑、CAD 执行和发布审批权限。
 5. 完善 Agent 操作审计，记录操作者来源、会话、工具、修改前后版本、变更差异、确认信息和执行结果。
