@@ -9,7 +9,7 @@ from template_core.sketch_solver import solve_semantic_sketch
 from ..ai_actions import AIModelProposal, ProposalError, apply_proposal, proposal_diff
 from ..errors import api_error
 from ..repository import Repository
-from ._common import draft_or_404, save_draft
+from ._common import draft_or_404, ensure_draft_revision, save_draft
 from .context import validate_stage_with_context
 from .proposal import sync_sketch_seed_coordinates
 
@@ -35,8 +35,15 @@ def preview_template_proposal(repository: Repository, draft_id: str, proposal: A
     }
 
 
-def apply_template_proposal(repository: Repository, draft_id: str, proposal: AIModelProposal, selected_command_ids: list[str] | None = None) -> TemplateDraft:
+def apply_template_proposal(
+    repository: Repository,
+    draft_id: str,
+    proposal: AIModelProposal,
+    selected_command_ids: list[str] | None = None,
+    expected_revision: int | None = None,
+) -> TemplateDraft:
     draft = draft_or_404(repository, draft_id)
+    ensure_draft_revision(draft, expected_revision)
     try:
         candidate, commands = apply_proposal(draft, proposal, selected_command_ids)
     except ProposalError as error:
@@ -69,4 +76,4 @@ def apply_template_proposal(repository: Repository, draft_id: str, proposal: AIM
     }
     candidate.aiProposals = [item for item in candidate.aiProposals if item.id != proposal.id]
     candidate.aiProposals.append(AIProposal.model_validate(audit))
-    return save_draft(repository, candidate, reason=f"proposal-apply-{proposal.taskType}")
+    return save_draft(repository, candidate, reason=f"proposal-apply-{proposal.taskType}", expected_revision=expected_revision)

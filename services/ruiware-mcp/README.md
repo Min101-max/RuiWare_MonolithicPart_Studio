@@ -11,7 +11,9 @@ python -m ruiware_mcp.server
 
 将 `services/ruiware-mcp` 加入 MCP 客户端的 Python 模块搜索路径，或安装为本地包后使用 `ruiware-mcp` 命令。
 
-可用工具：读取模板上下文和附件、确定性草图求解、提案预览、确认后提交提案、读取阶段校验、CAD 编译与结果检查、规则试算、阶段推进和 Agent 指引。提案提交与阶段推进会写入草稿，CAD 编译会记录编译结果；写入类工具仅在用户明确确认后调用。
+可用工具：读取模板上下文和附件、确定性草图求解、提案预览、确认后提交提案、读取阶段校验、CAD 编译与结果检查、规则试算、阶段推进和 Agent 指引。所有 MCP POST/PUT 请求都会固定标记为 Agent 来源，不能伪装成 GUI 请求。
+
+提案提交、参数/草图/材料写入、阶段完成、任务执行、CAD 编译、发布和回滚均必须传入当前 `baseRevision` 与 `confirmed=true`。创建模板必须传入 `name` 与 `confirmed=true`，随后切换 GUI 当前零部件时会继续透传确认状态。模板 API 会在业务执行前拒绝未确认或版本过期的请求；GUI 既有调用方式保持不变。
 
 当前 MCP 工具的名称、必填参数和读写属性记录在 `ruiware_mcp/core/contracts.py`，用于保证内部重构不破坏已有 Agent 调用。
 

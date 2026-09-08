@@ -10,6 +10,7 @@ from .tasks import execute as execute_task
 from .tasks import plan as plan_task
 from .publish import execute as publish_template
 from .create_template import execute as create_template
+from .rollback import execute as rollback_draft
 
 __all__ = [
     "check_brep",
@@ -22,4 +23,5 @@ __all__ = [
     "execute_task",
     "publish_template",
     "create_template",
+    "rollback_draft",
 ]
