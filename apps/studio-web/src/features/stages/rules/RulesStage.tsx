@@ -7,8 +7,21 @@ import {
   RuleParameterPanel,
   type NewRuleParameter,
 } from "./RuleParameterPanel";
+import {
+  addRuleDefaultParameters,
+  removeRuleDefaultParameters,
+} from "./ruleDefaultParameters";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
+
+const nextRuleId = (rules: FeatureRule[]) => {
+  const existingIds = new Set(rules.map((rule) => rule.id));
+  const baseId = uid("feature");
+  let ruleId = baseId;
+  let index = 2;
+  while (existingIds.has(ruleId)) ruleId = `${baseId}_${index++}`;
+  return ruleId;
+};
 
 const defaultNewRuleParameter = (): NewRuleParameter => ({
   id: "",
@@ -135,11 +148,9 @@ export function RulesStage({
         n === i ? { ...rule, ...patch } : rule,
       ),
     );
-  const addRule = () =>
-    setRules([
-      ...draft.featureRules,
-      {
-        id: uid("feature"),
+  const addRule = () => {
+    const newRule: FeatureRule = {
+        id: nextRuleId(draft.featureRules),
         name: "新制造规则",
         featureType: "circularHole",
         enabled: true,
@@ -155,8 +166,17 @@ export function RulesStage({
         maximumCount: 200,
         semanticGroup: null,
         description: "",
-      },
-    ]);
+      };
+    const next = addRuleDefaultParameters(
+      newRule,
+      draft.parameterDefinitions,
+    );
+    change({
+      ...draft,
+      featureRules: [...draft.featureRules, next.rule],
+      parameterDefinitions: next.parameterDefinitions,
+    });
+  };
   const changeArgumentMode = (
     index: number,
     rule: FeatureRule,
@@ -192,8 +212,9 @@ export function RulesStage({
     index: number,
     rule: FeatureRule,
     featureType: FeatureRule["featureType"],
-  ) =>
-    edit(index, {
+  ) => {
+    const nextRule: FeatureRule = {
+      ...rule,
       featureType,
       arguments:
         featureType === "circularHole" ? { x: 0, diameter: 12 }
@@ -211,7 +232,20 @@ export function RulesStage({
               { uExpression: "-10", vExpression: "length / 2 + 10" },
             ]
           : rule.polygonVertices,
+    };
+    const parameterDefinitions = removeRuleDefaultParameters(
+      draft.parameterDefinitions,
+      rule.id,
+    );
+    const next = addRuleDefaultParameters(nextRule, parameterDefinitions);
+    change({
+      ...draft,
+      parameterDefinitions: next.parameterDefinitions,
+      featureRules: draft.featureRules.map((item, itemIndex) =>
+        itemIndex === index ? next.rule : item,
+      ),
     });
+  };
   const editVertex = (
     index: number,
     rule: FeatureRule,
@@ -387,7 +421,14 @@ export function RulesStage({
                     <button
                       className="delete-icon"
                       onClick={() =>
-                        setRules(draft.featureRules.filter((_, n) => n !== i))
+                        change({
+                          ...draft,
+                          featureRules: draft.featureRules.filter((_, n) => n !== i),
+                          parameterDefinitions: removeRuleDefaultParameters(
+                            draft.parameterDefinitions,
+                            rule.id,
+                          ),
+                        })
                       }
                     >
                       <Trash2 size={15} />
