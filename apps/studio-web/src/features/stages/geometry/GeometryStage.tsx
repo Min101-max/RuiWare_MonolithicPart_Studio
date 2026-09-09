@@ -44,6 +44,7 @@ import { useGeometryEditFlow } from "./hooks/useGeometryEditFlow";
 import { ParametricSketchCanvas } from "./canvas/ParametricSketchCanvas";
 import {
   OPERATORS,
+  clearDanglingSemanticFaceLocators,
   createEmptySweepPath,
   csv,
   operatorDefaults,
@@ -181,6 +182,15 @@ import type {
   SweepPathWindowState,
   TemplateEvaluation,
 } from "../../../types";
+
+const PROFILE_LOCATOR_OPERATORS = new Set([
+  "profile.open_profile_tube_extrude",
+  "sketch.region_extrude",
+]);
+
+const supportsProfileFaceLocator = (operator: string) =>
+  PROFILE_LOCATOR_OPERATORS.has(operator);
+
 export function GeometryStage({
   draft,
   change,
@@ -257,12 +267,40 @@ export function GeometryStage({
   const editOp = (
     i: number,
     patch: Partial<GeometryRecipe["operations"][number]>,
-  ) =>
+  ) => {
+    const previousOperation = recipe.operations[i];
+    const previousId = previousOperation?.id;
+    const nextOperation = previousOperation
+      ? { ...previousOperation, ...patch }
+      : undefined;
+    const nextId = nextOperation?.id;
+    const locatorIsSupported = nextOperation
+      ? supportsProfileFaceLocator(nextOperation.operator)
+      : false;
     setRecipe({
       operations: recipe.operations.map((op, n) =>
         n === i ? { ...op, ...patch } : op,
       ),
+      ...(previousId && nextId
+        ? {
+            semanticFaces: recipe.semanticFaces.map((face) => ({
+              ...face,
+              sourceOperationId:
+                face.sourceOperationId === previousId
+                  ? nextId
+                  : face.sourceOperationId,
+              ...(face.locator?.operationId === previousId
+                ? {
+                    locator: locatorIsSupported
+                      ? { ...face.locator, operationId: nextId }
+                      : null,
+                  }
+                : {}),
+            })),
+          }
+        : {}),
     });
+  };
   const addOp = () =>
     setRecipe({
       operations: [
@@ -289,24 +327,64 @@ export function GeometryStage({
         n === index ? { ...face, ...patch } : face,
       ),
     });
-  const addSemanticFace = () =>
+  const addSemanticFace = () => {
+    const sourceOperation = recipe.operations.find(
+      (operation) =>
+        operation.operator === "profile.open_profile_tube_extrude" ||
+        operation.operator === "sketch.region_extrude",
+    );
+    const sourceEntity = draft.sketch.entities.find(
+      (entity) =>
+        !entity.construction &&
+        entity.geometryType !== "point",
+    );
+    const profileSketchId =
+      sourceOperation?.profileSketchId ||
+      sourceOperation?.sourceRefs.find((ref) => ref.startsWith("sketch.")) ||
+      recipe.sketches[0] ||
+      "sketch.section.main";
     setRecipe({
       semanticFaces: [
         ...recipe.semanticFaces,
-        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-sectionWidth / 2", uSpanExpression: "sectionWidth", vStartExpression: "0", vSpanExpression: "length" },
+        {
+          id: uid("part.face"),
+          label: "新语义面",
+          hostFrame: "negativeY",
+          sourceOperationId: sourceOperation?.id || recipe.operations[0]?.id || "body.main",
+          locator:
+            sourceOperation && sourceEntity
+              ? {
+                  kind: "profileEdge",
+                  operationId: sourceOperation.id,
+                  profileSketchId,
+                  sourceEntityId: sourceEntity.id,
+                }
+              : null,
+          uStartExpression: "-sectionWidth / 2",
+          uSpanExpression: "sectionWidth",
+          vStartExpression: "0",
+          vSpanExpression: "length",
+        },
       ],
     });
-  const setSketch = (patch: Partial<Draft["sketch"]>) =>
+  };
+  const setSketch = (patch: Partial<Draft["sketch"]>) => {
+    const nextSketch = normalizeSketchNumbers(
+      normalizeSketchTopology({
+        ...draft.sketch,
+        ...patch,
+        constraintsReviewed: false,
+      }),
+    );
     change({
       ...draft,
-      sketch: normalizeSketchNumbers(
-        normalizeSketchTopology({
-          ...draft.sketch,
-          ...patch,
-          constraintsReviewed: false,
-        }),
+      sketch: nextSketch,
+      geometryRecipe: clearDanglingSemanticFaceLocators(
+        draft.geometryRecipe,
+        nextSketch,
       ),
     });
+  };
   const acquisitionLabels = {
     manual: "交互绘制",
     imported: "导入转换",
@@ -360,6 +438,12 @@ export function GeometryStage({
                 },
               },
         ),
+        semanticFaces: reset
+          ? draft.geometryRecipe.semanticFaces.map((face) => ({
+              ...face,
+              locator: null,
+            }))
+          : draft.geometryRecipe.semanticFaces,
         reviewed: false,
       },
     });
@@ -405,6 +489,18 @@ export function GeometryStage({
           ),
         })),
         constraintsReviewed: false,
+      },
+      geometryRecipe: {
+        ...draft.geometryRecipe,
+        semanticFaces: draft.geometryRecipe.semanticFaces.map((face) =>
+          face.locator?.kind === "profileEdge" &&
+          face.locator.sourceEntityId === oldId
+            ? {
+                ...face,
+                locator: { ...face.locator, sourceEntityId: nextId },
+              }
+            : face,
+        ),
       },
     });
     setSelectedEntities((items) =>

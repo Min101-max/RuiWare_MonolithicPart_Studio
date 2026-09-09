@@ -1,6 +1,7 @@
 """Pure domain model and deterministic lowering for part templates."""
 
 from .models import CompileRequest, CompileResult, Diagnostic, SweepPathSketch, TemplateDraft
+from .metamodel import SemanticFaceLocator
 from .lowering import lower_to_plan
 from .sweep_path_sampling import (
     map_point_to_3d,
@@ -14,6 +15,7 @@ __all__ = [
     "CompileResult",
     "Diagnostic",
     "TemplateDraft",
+    "SemanticFaceLocator",
     "SweepPathSketch",
     "lower_to_plan",
     "map_point_to_3d",
