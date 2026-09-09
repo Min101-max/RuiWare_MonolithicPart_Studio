@@ -52,7 +52,7 @@ def test_failed_agent_guard_is_audited(tmp_path, monkeypatch):
     response = client.post(
         f"/api/v1/template-drafts/{draft['id']}/parameters/apply",
         json={"baseRevision": draft["revision"], "changes": [], "confirmed": True},
-        headers={"X-RuiWare-Actor": "agent"},
+        headers={"Authorization": "Bearer local-agent-token", "X-RuiWare-Actor": "agent"},
     )
 
     assert response.status_code == 422

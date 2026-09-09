@@ -135,6 +135,7 @@
 - `app/main.py`：FastAPI 入口，路由、启动装配、静态资源挂载。
 - `app/config.py`：路径、数据库和运行配置。
 - `app/errors.py`：统一错误码、错误响应和异常处理。
+- `app/security.py`：签名 GUI 会话、Agent Token、身份上下文和草稿归属边界。
 - `app/repository.py`：SQLite 持久层，管理草稿、绑定、编译记录和版本。
 - `app/ai_actions.py`：AI 提案解析、比对和应用。
 
@@ -385,6 +386,9 @@ Repository
 ```
 
 当前已经具备的安全能力：
+
+- API 通过签名 `ruiware_session` Cookie 识别 GUI 会话；MCP 必须使用 `Authorization: Bearer` 对应的 Agent Token，不能仅凭 `X-RuiWare-Actor` 或 `X-RuiWare-Source` 伪造身份。
+- 草稿归属由已验证身份决定，工作区选择由签名 GUI 会话或 Agent 的受控工作区标识决定；同一 Agent 如需读取 GUI 当前选择，应配置与 GUI 相同的工作区会话标识。
 
 - GUI 和 Agent 都不能直接绕过模板 API 操作数据库，草稿统一通过 `Repository` 保存。
 - 阶段完成、参数契约、草图、材料、CAD 编译和发布均由后端及领域层再次校验，前端校验不是最终安全边界。

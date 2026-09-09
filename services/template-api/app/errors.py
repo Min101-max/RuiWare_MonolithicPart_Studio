@@ -61,6 +61,8 @@ ERROR_MESSAGES: dict[str, tuple[str, str | None]] = {
     "WRITE_REVISION_INVALID": ("写入修订号不合法。", "请提供大于零的 baseRevision。"),
     "WRITE_REVISION_REQUIRED": ("Agent 写入缺少 baseRevision。", "请先读取当前草稿版本，再提交写入。"),
     "WRITE_CONFIRMATION_REQUIRED": ("Agent 写入尚未确认。", "请先预览变更并明确确认后再写入。"),
+    "AUTHENTICATION_REQUIRED": ("请求身份未通过验证。", "请使用有效的 GUI 会话或 Agent Token 后重试。"),
+    "DRAFT_ACCESS_FORBIDDEN": ("当前会话无权访问该草稿。", "请切换到已授权的工作区或联系草稿负责人。"),
     "PUBLISH_ALREADY_PUBLISHED": ("当前修订已发布。", "请先修改模板并重新完成受影响阶段。"),
     "PUBLISH_VALIDATION_FAILED": ("发布准入校验未通过。", "请处理校验项后重新发布。"),
     "REQUEST_INVALID": ("请求数据格式不正确。", "请检查输入字段后重试。"),
