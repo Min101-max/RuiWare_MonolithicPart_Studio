@@ -1,13 +1,7 @@
 import { useState } from "react";
-import { ArrowRight, GitBranch, Plus, Trash2, Variable, X } from "lucide-react";
+import { ArrowRight, GitBranch, Plus, Trash2, X } from "lucide-react";
 import { Field, NumberInput, PanelTitle } from "../../../components/ui/FormParts";
 import { RuleLocalPreview } from "../review/compile/RuleLocalPreview";
-import {
-  normalizeParameterAliasReferences,
-  parameterDefaultForType,
-  parameterValueType,
-  renameParameterReferences,
-} from "../../authoring/authoringUtils";
 import type { Draft, FeatureRule, ParameterDefinition } from "../../../types";
 import {
   RuleParameterPanel,
@@ -15,6 +9,16 @@ import {
 } from "./RuleParameterPanel";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
+
+const defaultNewRuleParameter = (): NewRuleParameter => ({
+  id: "",
+  displayName: "",
+  valueType: "number",
+  unit: "mm",
+  default: 100,
+  minimum: 0,
+  maximum: 1000,
+});
 
 const scalar = (value: string): string | number | boolean => {
   if (value === "true") return true;
@@ -31,86 +35,19 @@ export function RulesStage({
   change: (d: Draft) => void;
 }) {
   const semanticFaces = draft.geometryRecipe.semanticFaces;
-  const declaredParameters = draft.parameterDefinitions.filter(
+  const predeclaredParameters = draft.parameterDefinitions.filter(
     (parameter) => parameter.declaredInRuleStage,
   );
-  const pendingParameters = declaredParameters.filter(
+  const existingParameters = draft.parameterDefinitions.filter(
+    (parameter) => !parameter.declaredInRuleStage,
+  );
+  const pendingParameters = predeclaredParameters.filter(
     (parameter) => !parameter.contractReady,
   );
   const [ruleParameterError, setRuleParameterError] = useState("");
-  const [ruleParameterRenameErrors, setRuleParameterRenameErrors] = useState<
-    Record<string, string>
-  >({});
-  const [newRuleParameter, setNewRuleParameter] = useState<NewRuleParameter>({
-    id: "",
-    displayName: "",
-    valueType: "number",
-    unit: "mm",
-    default: 100,
-    minimum: 0,
-    maximum: 1000,
-  });
+  const [newRuleParameter, setNewRuleParameter] = useState<NewRuleParameter>(defaultNewRuleParameter);
   const setRules = (featureRules: FeatureRule[]) =>
     change({ ...draft, featureRules });
-  const editParameter = (parameterId: string, patch: Partial<ParameterDefinition>) =>
-    change({
-      ...draft,
-      parameterDefinitions: draft.parameterDefinitions.map((parameter) =>
-        parameter.id === parameterId
-          ? {
-              ...parameter,
-              ...patch,
-              ...(parameter.declaredInRuleStage
-                ? { contractReady: false }
-                : {}),
-            }
-          : parameter,
-      ),
-    });
-  const editParameterDisplayName = (parameter: ParameterDefinition, displayName: string) => {
-    const normalized = normalizeParameterAliasReferences(draft, parameter.id, [
-      parameter.displayName || "",
-      parameter.label || "",
-    ]);
-    change({
-      ...normalized,
-      parameterDefinitions: normalized.parameterDefinitions.map((item) =>
-        item.id === parameter.id
-          ? {
-              ...item,
-              label: displayName,
-              displayName,
-              ...(item.declaredInRuleStage ? { contractReady: false } : {}),
-            }
-          : item,
-      ),
-    });
-  };
-  const renameRuleParameter = (previousId: string, rawNextId: string) => {
-    const nextId = rawNextId.trim();
-    if (nextId === previousId) return true;
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(nextId)) {
-      setRuleParameterRenameErrors((errors) => ({
-        ...errors,
-        [previousId]: "ID 须以字母开头，只能包含字母、数字和下划线。",
-      }));
-      return false;
-    }
-    if (draft.parameterDefinitions.some((parameter) => parameter.id === nextId)) {
-      setRuleParameterRenameErrors((errors) => ({
-        ...errors,
-        [previousId]: "该参数 ID 已存在。",
-      }));
-      return false;
-    }
-    change(renameParameterReferences(draft, previousId, nextId));
-    setRuleParameterRenameErrors((errors) => {
-      const next = { ...errors };
-      delete next[previousId];
-      return next;
-    });
-    return true;
-  };
   const createRuleParameter = (parameter: {
     id: string;
     label: string;
@@ -143,15 +80,19 @@ export function RulesStage({
     contractReady: false,
     description: "规则页预声明，进入契约页后补全来源、作用域与发布要求。",
   });
+  const resetNewRuleParameter = () => {
+    setNewRuleParameter(defaultNewRuleParameter());
+    setRuleParameterError("");
+  };
   const addRuleParameter = () => {
     const id = newRuleParameter.id.trim();
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
       setRuleParameterError("参数 ID 需以字母开头，只能包含字母、数字和下划线。");
-      return;
+      return false;
     }
     if (draft.parameterDefinitions.some((parameter) => parameter.id === id)) {
       setRuleParameterError("参数 ID 已存在。");
-      return;
+      return false;
     }
     if (
       newRuleParameter.valueType === "number" ||
@@ -159,14 +100,14 @@ export function RulesStage({
     ) {
       if (newRuleParameter.minimum > newRuleParameter.maximum) {
         setRuleParameterError("最小值不能大于最大值。");
-        return;
+        return false;
       }
       if (
         newRuleParameter.minimum > newRuleParameter.default ||
         newRuleParameter.default > newRuleParameter.maximum
       ) {
         setRuleParameterError("需满足最小值 ≤ 标称值 ≤ 最大值。");
-        return;
+        return false;
       }
     }
     change({
@@ -185,16 +126,8 @@ export function RulesStage({
         }),
       ],
     });
-    setNewRuleParameter({
-      id: "",
-      displayName: "",
-      valueType: "number",
-      unit: "mm",
-      default: 100,
-      minimum: 0,
-      maximum: 1000,
-    });
-    setRuleParameterError("");
+    resetNewRuleParameter();
+    return true;
   };
   const edit = (i: number, patch: Partial<FeatureRule>) =>
     setRules(
@@ -402,15 +335,13 @@ export function RulesStage({
       </div>
       <RuleParameterPanel
         pendingParameters={pendingParameters}
-        declaredParameters={declaredParameters}
+        existingParameters={existingParameters}
+        predeclaredParameters={predeclaredParameters}
         newRuleParameter={newRuleParameter}
         setNewRuleParameter={setNewRuleParameter}
         ruleParameterError={ruleParameterError}
-        ruleParameterRenameErrors={ruleParameterRenameErrors}
         addRuleParameter={addRuleParameter}
-        renameRuleParameter={renameRuleParameter}
-        editParameterDisplayName={editParameterDisplayName}
-        editParameter={editParameter}
+        resetNewRuleParameter={resetNewRuleParameter}
       />
       {draft.featureRules.length === 0 ? (
         <div className="empty-canvas">

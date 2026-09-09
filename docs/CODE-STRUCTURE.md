@@ -184,9 +184,13 @@
 - `cad_worker/__init__.py`：包标记文件。
 - `cad_worker/cli.py`：命令行入口，读取计划并执行。
 - `cad_worker/geometry.py`：几何执行总入口，负责调度整个执行链。
-- `cad_worker/body_ops.py`：基础实体生成、放样、折弯、薄壁中心线等实体算子。
-- `cad_worker/feature_ops.py`：加工特征与布尔切削算子。
-- `cad_worker/sweep_ops.py`：扫掠相关算子与路径处理。
+- `cad_worker/operators/`：全部几何算子实现目录，按基础实体、基体、加工特征和扫掠职责分组。
+- `cad_worker/operators/base_entities.py`：点、线、面、轮廓和基础实体构造。
+- `cad_worker/operators/body_ops.py`：基体生成、放样、折弯、薄壁中心线等实体算子。
+- `cad_worker/operators/feature_ops.py`：加工特征与布尔切削算子。
+- `cad_worker/operators/sweep_ops.py`：扫掠相关算子与路径处理。
+- `cad_worker/operators/legacy.py`：旧版单文件算子实现，仅保留历史兼容，不作为新执行入口。
+- `cad_worker/base_entities.py`、`cad_worker/body_ops.py`、`cad_worker/feature_ops.py`、`cad_worker/sweep_ops.py`：旧导入路径兼容转发，不再放置实现代码。
 - `cad_worker/exporters.py`：STEP / STL / 语义图 / 诊断文件导出。
 - `cad_worker/postcheck.py`：B-Rep 后置检查与实体数量统计。
 

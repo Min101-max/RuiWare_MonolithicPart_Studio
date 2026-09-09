@@ -4,11 +4,11 @@ from pathlib import Path
 
 from template_core.models import CanonicalPlan, CompileResult, Diagnostic, GeometryMetrics
 
-from .base_entities import _through_penetration_for_shape
+from .operators.base_entities import _through_penetration_for_shape
 from .exporters import write_compile_artifacts
-from .body_ops import FaceMap, build_body_with_face_map, resolve_face_support
-from .feature_ops import FEATURE_OPERATORS, apply_operation
-from .sweep_ops import SweepPathConstructionError, _build_sweep_path_wire, _sketch_sweep
+from .operators.body_ops import FaceMap, build_body_with_face_map, resolve_face_support
+from .operators.feature_ops import FEATURE_OPERATORS, apply_operation
+from .operators.sweep_ops import SweepPathConstructionError, _build_sweep_path_wire, _sketch_sweep
 from .postcheck import check_brep
 
 
