@@ -112,6 +112,10 @@ class Repository:
                     metadata_json TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS draft_access (
+                    draft_id TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL
+                );
                 """
             )
             connection.execute(
@@ -121,6 +125,9 @@ class Repository:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(template_drafts)")}
             if "archived_at" not in columns:
                 connection.execute("ALTER TABLE template_drafts ADD COLUMN archived_at TEXT")
+            connection.execute(
+                "INSERT OR IGNORE INTO draft_access (draft_id, owner_id) SELECT id, 'local-dev-user' FROM template_drafts"
+            )
 
     def create_binding(self, source_record_id: str, mode: str) -> MaterialBinding:
         if mode not in {"reference", "copy"}:
@@ -289,18 +296,39 @@ class Repository:
             return None
         return self._parse_draft(row["payload_json"])
 
+    def ensure_draft_access(self, draft_id: str, owner_id: str | None, *, claim_unowned: bool = False) -> None:
+        if owner_id is None:
+            return
+        with self.connect() as connection:
+            row = connection.execute("SELECT owner_id FROM draft_access WHERE draft_id = ?", (draft_id,)).fetchone()
+            if row is None:
+                if self.get_draft_optional(draft_id, include_archived=True) is None:
+                    from .errors import api_error
+                    raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id})
+                if not claim_unowned:
+                    from .errors import api_error
+                    raise api_error("DRAFT_ACCESS_FORBIDDEN", status_code=403, context={"draftId": draft_id})
+                connection.execute("INSERT INTO draft_access (draft_id, owner_id) VALUES (?, ?)", (draft_id, owner_id))
+            elif row["owner_id"] != owner_id:
+                from .errors import api_error
+                raise api_error("DRAFT_ACCESS_FORBIDDEN", status_code=403, context={"draftId": draft_id})
+
     def get_draft(self, draft_id: str, *, include_archived: bool = False) -> TemplateDraft:
         draft = self.get_draft_optional(draft_id, include_archived=include_archived)
         if draft is None:
             raise KeyError(draft_id)
         return draft
 
-    def list_drafts(self, *, include_archived: bool = False) -> list[TemplateDraft]:
+    def list_drafts(self, *, include_archived: bool = False, owner_id: str | None = None) -> list[TemplateDraft]:
         where = "" if include_archived else "WHERE archived_at IS NULL"
         with self.connect() as connection:
-            rows = connection.execute(
-                f"SELECT payload_json FROM template_drafts {where} ORDER BY updated_at DESC"
-            ).fetchall()
+            if owner_id:
+                rows = connection.execute(
+                    f"SELECT d.payload_json FROM template_drafts d JOIN draft_access a ON a.draft_id = d.id WHERE {('d.archived_at IS NULL' if not include_archived else '1=1')} AND a.owner_id = ? ORDER BY d.updated_at DESC",
+                    (owner_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(f"SELECT payload_json FROM template_drafts {where} ORDER BY updated_at DESC").fetchall()
         drafts: list[TemplateDraft] = []
         for row in rows:
             parsed = self._parse_draft(row["payload_json"])
@@ -314,38 +342,43 @@ class Repository:
                 "UPDATE template_drafts SET archived_at = ? WHERE id = ? AND archived_at IS NULL",
                 (_now(), draft_id),
             )
-            connection.execute(
-                "UPDATE workspace_context SET current_draft_id = NULL, updated_at = ? WHERE id = 'default' AND current_draft_id = ?",
-                (_now(), draft_id),
-            )
+            connection.execute("UPDATE workspace_context SET current_draft_id = NULL, updated_at = ? WHERE current_draft_id = ?", (_now(), draft_id))
         if result.rowcount == 0:
             raise KeyError(draft_id)
 
-    def set_current_draft(self, draft_id: str) -> str:
+    def set_current_draft(self, draft_id: str, workspace_id: str | None = None, owner_id: str | None = None) -> str:
         """记录本地工作区当前选中的未归档零部件。"""
         self.get_draft(draft_id)
+        self.ensure_draft_access(draft_id, owner_id, claim_unowned=owner_id == "local-dev-user")
         updated_at = _now()
         with self.connect() as connection:
-            connection.execute(
-                "UPDATE workspace_context SET current_draft_id = ?, updated_at = ? WHERE id = 'default'",
-                (draft_id, updated_at),
-            )
+            key = f"{owner_id}:{workspace_id}" if owner_id and workspace_id else workspace_id or "default"
+            connection.execute("INSERT INTO workspace_context (id, current_draft_id, updated_at) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET current_draft_id = excluded.current_draft_id, updated_at = excluded.updated_at", (key, draft_id, updated_at))
         return updated_at
 
-    def get_current_draft_id(self) -> str | None:
+    def get_current_draft_id(self, workspace_id: str | None = None) -> str | None:
         """读取本地工作区当前选中的零部件 ID。"""
         with self.connect() as connection:
             row = connection.execute(
-                "SELECT current_draft_id FROM workspace_context WHERE id = 'default'"
+                "SELECT current_draft_id FROM workspace_context WHERE id = ?", (workspace_id or "default",)
             ).fetchone()
         return row["current_draft_id"] if row else None
 
-    def clear_current_draft(self) -> None:
+    def claim_draft(self, draft_id: str, owner_id: str | None) -> None:
+        if owner_id is None:
+            return
+        with self.connect() as connection:
+            connection.execute(
+                "INSERT OR IGNORE INTO draft_access (draft_id, owner_id) VALUES (?, ?)",
+                (draft_id, owner_id),
+            )
+
+    def clear_current_draft(self, workspace_id: str | None = None) -> None:
         """清除当前工作区选择。"""
         with self.connect() as connection:
             connection.execute(
-                "UPDATE workspace_context SET current_draft_id = NULL, updated_at = ? WHERE id = 'default'",
-                (_now(),),
+                "UPDATE workspace_context SET current_draft_id = NULL, updated_at = ? WHERE id = ?",
+                (_now(), workspace_id or "default"),
             )
 
     def record_audit(

@@ -88,6 +88,7 @@ from .services.operations import (  # noqa: E402
     set_current_draft as set_current_draft_service,
 )  # noqa: E402
 from .services.write_context import parse_write_context  # noqa: E402
+from .security import bind_request, release_request, current_owner_id, signed_session  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -243,17 +244,35 @@ def _draft_id_from_path(path: str) -> str | None:
 async def write_context_middleware(request: Request, call_next):
     mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
     guarded = mutating and not _agent_guard_exempt(request.url.path)
+    principal = None
+    created_session = False
+    security_token = None
     try:
+        principal, created_session, security_token = bind_request(request)
         context = parse_write_context(request, require_write_guard=guarded)
+        draft_id = _draft_id_from_path(request.url.path)
+        if draft_id:
+            repository.ensure_draft_access(
+                draft_id,
+                principal.owner_id,
+                claim_unowned=principal.actor == "gui" and not request.headers.get("Authorization"),
+            )
+        query_draft_id = request.query_params.get("draftId")
+        if query_draft_id:
+            repository.ensure_draft_access(
+                query_draft_id,
+                principal.owner_id,
+                claim_unowned=principal.actor == "gui" and not request.headers.get("Authorization"),
+            )
     except HTTPException as error:
         draft_id = _draft_id_from_path(request.url.path)
         before = repository.get_draft_optional(draft_id) if draft_id else None
         detail = error.detail if isinstance(error.detail, dict) else {}
         repository.record_audit(
             action=f"{request.method} {request.url.path}",
-            actor=request.headers.get("X-RuiWare-Actor", "gui"),
-            source=request.headers.get("X-RuiWare-Source", "gui"),
-            session_id=request.headers.get("X-RuiWare-Session"),
+            actor=principal.actor if principal else "unknown",
+            source=principal.source if principal else "unknown",
+            session_id=principal.session_id if principal else None,
             draft_id=draft_id,
             before_revision=before.revision if before else None,
             after_revision=before.revision if before else None,
@@ -262,10 +281,18 @@ async def write_context_middleware(request: Request, call_next):
             error_code=detail.get("code"),
             metadata={"statusCode": error.status_code},
         )
+        if security_token is not None:
+            release_request(security_token)
         return await http_exception_handler(request, error)
     draft_id = _draft_id_from_path(request.url.path)
     before = repository.get_draft_optional(draft_id) if draft_id else None
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    finally:
+        if security_token is not None:
+            release_request(security_token)
+    if created_session:
+        response.set_cookie("ruiware_session", signed_session(principal.session_id), httponly=True, samesite="lax")
     if mutating and request.url.path != "/api/v1/template-drafts/{draft_id}/rollback" and not request.url.path.endswith("/rollback"):
         after = repository.get_draft_optional(draft_id) if draft_id else None
         repository.record_audit(
@@ -408,7 +435,7 @@ def create_named_template_draft(body: NewDraftRequest, request: Request):
 
 @app.get("/api/v1/template-drafts", response_model=list[TemplateDraft])
 def list_template_drafts(includeArchived: bool = False):
-    return repository.list_drafts(include_archived=includeArchived)
+    return repository.list_drafts(include_archived=includeArchived, owner_id=current_owner_id())
 
 
 @app.get("/api/v1/workspace/current-draft")
