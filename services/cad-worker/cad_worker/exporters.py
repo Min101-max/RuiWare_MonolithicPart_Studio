@@ -11,7 +11,7 @@ from OCP.StlAPI import StlAPI_Writer
 
 from template_core.models import Artifact, CanonicalPlan, Diagnostic
 
-from .body_ops import FaceMap, resolve_face_support
+from .operators.body_ops import FaceMap, resolve_face_support
 
 
 def _json_locator(locator):
