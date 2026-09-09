@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from typing import Any, Literal, TypeAlias
 
+from OCP.Bnd import Bnd_Box
+from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut, BRepAlgoAPI_Fuse
+from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepBuilderAPI import (
     BRepBuilderAPI_MakeEdge,
     BRepBuilderAPI_MakeFace,
@@ -12,8 +17,12 @@ from OCP.BRepBuilderAPI import (
 )
 from OCP.BRepOffsetAPI import BRepOffsetAPI_MakePipeShell, BRepOffsetAPI_ThruSections
 from OCP.BRepPrimAPI import BRepPrimAPI_MakePrism, BRepPrimAPI_MakeRevol
+from OCP.GeomAbs import GeomAbs_Plane
 from OCP.GC import GC_MakeArcOfCircle
 from OCP.ShapeUpgrade import ShapeUpgrade_UnifySameDomain
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED
+from OCP.TopExp import TopExp_Explorer
+from OCP.TopoDS import TopoDS, TopoDS_Face, TopoDS_Shape
 from OCP.gp import gp_Ax1, gp_Dir, gp_Pnt, gp_Vec
 
 from template_core.sweep_frames import path_frames, segment_start_frames
@@ -32,11 +41,370 @@ from .sweep_ops import _sketch_sweep
 from .postcheck import solid_count as _solid_count
 
 
+Vector3: TypeAlias = tuple[float, float, float]
+
+
+@dataclass(frozen=True)
+class FaceSupport:
+    """Runtime support geometry traced from an authored profile source.
+
+    ``supportFace`` is an OCCT face occurrence from the completed prism.  The
+    frame origin is the minimum U/V corner of the source-owned face domain;
+    U and V use the same positive world-axis convention as ``hostFrame``.
+    Callers combine this origin with the resolved semantic-face U/V bounds,
+    so two coplanar profile edges retain different local origins.
+    """
+
+    supportFace: TopoDS_Face
+    origin: Vector3
+    uDirection: Vector3
+    vDirection: Vector3
+    normal: Vector3
+    sourceEntityId: str
+    operationId: str
+    profileSketchId: str
+    kind: Literal["profileEdge", "profileRegion"]
+    capSide: Literal["start", "end"] | None = None
+
+
+FaceMap: TypeAlias = dict[str, list[FaceSupport]]
+
+
+def _locator_value(locator: Any, name: str) -> Any:
+    if isinstance(locator, dict):
+        return locator.get(name)
+    return getattr(locator, name, None)
+
+
+def resolve_face_support(face_map: FaceMap, locator: Any) -> FaceSupport:
+    """Resolve one authored locator without consulting B-Rep face ordering."""
+
+    source_entity_id = str(_locator_value(locator, "sourceEntityId") or "")
+    kind = _locator_value(locator, "kind")
+    operation_id = str(_locator_value(locator, "operationId") or "")
+    profile_sketch_id = str(_locator_value(locator, "profileSketchId") or "")
+    cap_side = _locator_value(locator, "capSide")
+    matches = [
+        support
+        for support in face_map.get(source_entity_id, [])
+        if support.kind == kind
+        and support.operationId == operation_id
+        and support.profileSketchId == profile_sketch_id
+        and support.capSide == cap_side
+    ]
+    locator_label = (
+        f"kind={kind!r}, operationId={operation_id!r}, "
+        f"profileSketchId={profile_sketch_id!r}, "
+        f"sourceEntityId={source_entity_id!r}, capSide={cap_side!r}"
+    )
+    if not matches:
+        raise RuntimeError(f"Semantic face locator did not resolve to a support face: {locator_label}")
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Semantic face locator resolved ambiguously to {len(matches)} support faces: {locator_label}"
+        )
+    return matches[0]
+
+
+def _unique_shapes(shapes: list[TopoDS_Shape]) -> list[TopoDS_Shape]:
+    unique: list[TopoDS_Shape] = []
+    for shape in shapes:
+        if not any(shape.IsSame(existing) for existing in unique):
+            unique.append(shape)
+    return unique
+
+
+def _matching_subshapes(
+    root: TopoDS_Shape,
+    target: TopoDS_Shape,
+    shape_type: Any,
+) -> list[TopoDS_Shape]:
+    """Return occurrences matching known topology, never an ordinal face."""
+
+    matches: list[TopoDS_Shape] = []
+    if root.ShapeType() == shape_type and root.IsSame(target):
+        matches.append(root)
+    explorer = TopExp_Explorer(root, shape_type)
+    while explorer.More():
+        occurrence = explorer.Current()
+        if occurrence.IsSame(target):
+            matches.append(occurrence)
+        explorer.Next()
+    return _unique_shapes(matches)
+
+
+def _propagate_history(
+    builder: Any,
+    result: TopoDS_Shape,
+    sources: dict[str, list[TopoDS_Shape]],
+    shape_type: Any,
+) -> dict[str, list[TopoDS_Shape]]:
+    propagated: dict[str, list[TopoDS_Shape]] = {}
+    for source_id, source_shapes in sources.items():
+        occurrences: list[TopoDS_Shape] = []
+        for source_shape in source_shapes:
+            successors = list(builder.Modified(source_shape)) + list(builder.Generated(source_shape))
+            if not builder.IsDeleted(source_shape):
+                successors.append(source_shape)
+            for successor in successors:
+                occurrences.extend(_matching_subshapes(result, successor, shape_type))
+        occurrences = _unique_shapes(occurrences)
+        if occurrences:
+            propagated[source_id] = occurrences
+    return propagated
+
+
+def _merge_source_shapes(
+    current: dict[str, list[TopoDS_Shape]],
+    additions: dict[str, list[TopoDS_Shape]],
+) -> dict[str, list[TopoDS_Shape]]:
+    merged = {source_id: list(shapes) for source_id, shapes in current.items()}
+    for source_id, shapes in additions.items():
+        merged[source_id] = _unique_shapes([*merged.get(source_id, []), *shapes])
+    return merged
+
+
+def _region_face_with_source_edges(sketch: dict[str, Any], region: dict[str, Any]):
+    primitives = {
+        item["id"]: item
+        for item in sketch["primitives"]
+        if not item.get("construction")
+    }
+    wire_builder = BRepBuilderAPI_MakeWire()
+    source_edges: dict[str, list[TopoDS_Shape]] = {}
+    for reference in region["boundaryRefs"]:
+        primitive = primitives[reference]
+        wire_builder.Add(_primitive_edge(primitive, sketch.get("plane", "XY")))
+        if not wire_builder.IsDone():
+            raise RuntimeError(f"Sketch region wire failed: {region['id']}")
+        # MakeWire may replace the edge supplied to Add in order to share a
+        # vertex with the preceding edge.  Edge() is the exact edge retained
+        # by the wire and therefore the one accepted by MakePrism.Generated.
+        source_edges.setdefault(reference, []).append(wire_builder.Edge())
+    face = BRepBuilderAPI_MakeFace(wire_builder.Wire()).Face()
+    return face, source_edges
+
+
+def _material_face_with_sources(sketch: dict[str, Any]):
+    records = []
+    for region in sketch["regions"]:
+        face, edges = _region_face_with_source_edges(sketch, region)
+        records.append((region, face, edges))
+    additive = [record for record in records if record[0]["operation"] == "add"]
+    subtractive = [record for record in records if record[0]["operation"] == "subtract"]
+    if not additive:
+        raise RuntimeError("Sketch has no additive material region")
+
+    first_region, material, first_edges = additive[0]
+    tracked_edges = first_edges
+    tracked_regions: dict[str, list[TopoDS_Shape]] = {}
+    original_region_faces: dict[str, TopoDS_Face] = {}
+    if first_region.get("closed", True):
+        tracked_regions[first_region["id"]] = [material]
+        original_region_faces[first_region["id"]] = material
+
+    for region, face, edges in additive[1:]:
+        tracked_edges = _merge_source_shapes(tracked_edges, edges)
+        if region.get("closed", True):
+            tracked_regions = _merge_source_shapes(tracked_regions, {region["id"]: [face]})
+            original_region_faces[region["id"]] = face
+        operation = BRepAlgoAPI_Fuse(material, face)
+        operation.Build()
+        if not operation.IsDone():
+            raise RuntimeError(f"Sketch additive-region fuse failed: {region['id']}")
+        material = operation.Shape()
+        tracked_edges = _propagate_history(operation, material, tracked_edges, TopAbs_EDGE)
+        tracked_regions = _propagate_history(operation, material, tracked_regions, TopAbs_FACE)
+
+    for region, face, edges in subtractive:
+        # A subtractive region contributes its boundary's longitudinal faces,
+        # but the removed region itself cannot own a start/end material cap.
+        tracked_edges = _merge_source_shapes(tracked_edges, edges)
+        operation = BRepAlgoAPI_Cut(material, face)
+        operation.Build()
+        if not operation.IsDone():
+            raise RuntimeError(f"Sketch subtractive-region cut failed: {region['id']}")
+        material = operation.Shape()
+        tracked_edges = _propagate_history(operation, material, tracked_edges, TopAbs_EDGE)
+        tracked_regions = _propagate_history(operation, material, tracked_regions, TopAbs_FACE)
+
+    return material, tracked_edges, tracked_regions, original_region_faces
+
+
+def _unit_vector(values: Vector3) -> Vector3:
+    length = math.sqrt(sum(value * value for value in values))
+    if length <= 1e-12:
+        raise RuntimeError("Face support direction is degenerate")
+    return tuple(value / length for value in values)  # type: ignore[return-value]
+
+
+def _dot(first: Vector3, second: Vector3) -> float:
+    return sum(a * b for a, b in zip(first, second))
+
+
+def _canonical_face_axes(
+    normal: Vector3,
+    surface: BRepAdaptor_Surface,
+) -> tuple[Vector3, Vector3]:
+    dominant = max(range(3), key=lambda index: abs(normal[index]))
+    if abs(normal[dominant]) >= 1 - 1e-8:
+        return {
+            0: ((0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+            1: ((1.0, 0.0, 0.0), (0.0, 0.0, 1.0)),
+            2: ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+        }[dominant]
+
+    # Slanted planar edges remain traceable even though today's six
+    # hostFrames cannot consume them without a later explicit-frame model.
+    plane = surface.Plane()
+    x_direction = plane.XAxis().Direction()
+    y_direction = plane.YAxis().Direction()
+    return (
+        (x_direction.X(), x_direction.Y(), x_direction.Z()),
+        (y_direction.X(), y_direction.Y(), y_direction.Z()),
+    )
+
+
+def _support_frame(face: TopoDS_Face, domain_shape: TopoDS_Shape | None = None):
+    surface = BRepAdaptor_Surface(face, True)
+    if surface.GetType() != GeomAbs_Plane:
+        return None
+    plane = surface.Plane()
+    plane_normal = plane.Axis().Direction()
+    sign = -1.0 if face.Orientation() == TopAbs_REVERSED else 1.0
+    normal = _unit_vector((
+        sign * plane_normal.X(),
+        sign * plane_normal.Y(),
+        sign * plane_normal.Z(),
+    ))
+    u_direction, v_direction = _canonical_face_axes(normal, surface)
+
+    bounds = Bnd_Box()
+    BRepBndLib.AddOptimal_s(domain_shape or face, bounds, False, False)
+    xmin, ymin, zmin, xmax, ymax, zmax = bounds.Get()
+    corners = [
+        (x, y, z)
+        for x in (xmin, xmax)
+        for y in (ymin, ymax)
+        for z in (zmin, zmax)
+    ]
+    minimum_u = min(_dot(point, u_direction) for point in corners)
+    minimum_v = min(_dot(point, v_direction) for point in corners)
+    location = plane.Location()
+    normal_offset = _dot((location.X(), location.Y(), location.Z()), normal)
+    origin = tuple(
+        minimum_u * u_direction[index]
+        + minimum_v * v_direction[index]
+        + normal_offset * normal[index]
+        for index in range(3)
+    )
+    return origin, u_direction, v_direction, normal
+
+
+def _append_face_support(face_map: FaceMap, support: FaceSupport) -> None:
+    existing = face_map.setdefault(support.sourceEntityId, [])
+    if any(
+        item.kind == support.kind
+        and item.capSide == support.capSide
+        and item.operationId == support.operationId
+        and item.profileSketchId == support.profileSketchId
+        and item.supportFace.IsSame(support.supportFace)
+        for item in existing
+    ):
+        return
+    existing.append(support)
+
+
 def _sketch_region_extrude(arguments):
     sketch = arguments["sketch"]
     face = _material_face(sketch)
     length = float(arguments["length"])
     return BRepPrimAPI_MakePrism(face, _normal_vector(sketch.get("plane", "XY"), length)).Shape()
+
+
+def _faces_in(shape: TopoDS_Shape) -> list[TopoDS_Shape]:
+    if shape.ShapeType() == TopAbs_FACE:
+        return [shape]
+    faces: list[TopoDS_Shape] = []
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    while explorer.More():
+        faces.append(explorer.Current())
+        explorer.Next()
+    return _unique_shapes(faces)
+
+
+def _sketch_region_extrude_with_face_map(
+    arguments: dict[str, Any],
+    operation_id: str,
+    profile_sketch_id: str,
+):
+    sketch = arguments["sketch"]
+    material, source_edges, source_regions, original_region_faces = _material_face_with_sources(sketch)
+    length = float(arguments["length"])
+    prism = BRepPrimAPI_MakePrism(
+        material,
+        _normal_vector(sketch.get("plane", "XY"), length),
+    )
+    prism.Build()
+    if not prism.IsDone():
+        raise RuntimeError("Sketch region extrusion failed")
+    shape = prism.Shape()
+    face_map: FaceMap = {}
+    primitives = {item["id"]: item for item in sketch["primitives"]}
+
+    for source_entity_id, edges in source_edges.items():
+        primitive = primitives.get(source_entity_id)
+        if primitive is None or primitive.get("type") != "line":
+            # Arc/circle extrusion produces a curved side and is deliberately
+            # outside the first planar locator implementation.
+            continue
+        for edge in edges:
+            for generated in prism.Generated(edge):
+                for occurrence in _matching_subshapes(shape, generated, TopAbs_FACE):
+                    support_face = TopoDS.Face_s(occurrence)
+                    frame = _support_frame(support_face)
+                    if frame is None:
+                        continue
+                    origin, u_direction, v_direction, normal = frame
+                    _append_face_support(face_map, FaceSupport(
+                        supportFace=support_face,
+                        origin=origin,
+                        uDirection=u_direction,
+                        vDirection=v_direction,
+                        normal=normal,
+                        sourceEntityId=source_entity_id,
+                        operationId=operation_id,
+                        profileSketchId=profile_sketch_id,
+                        kind="profileEdge",
+                    ))
+
+    for source_entity_id, basis_faces in source_regions.items():
+        original_face = original_region_faces[source_entity_id]
+        for basis_face in basis_faces:
+            for cap_side, cap_shape in (
+                ("start", prism.FirstShape(basis_face)),
+                ("end", prism.LastShape(basis_face)),
+            ):
+                for generated_cap in _faces_in(cap_shape):
+                    for occurrence in _matching_subshapes(shape, generated_cap, TopAbs_FACE):
+                        support_face = TopoDS.Face_s(occurrence)
+                        frame = _support_frame(support_face, original_face)
+                        if frame is None:
+                            continue
+                        origin, u_direction, v_direction, normal = frame
+                        _append_face_support(face_map, FaceSupport(
+                            supportFace=support_face,
+                            origin=origin,
+                            uDirection=u_direction,
+                            vDirection=v_direction,
+                            normal=normal,
+                            sourceEntityId=source_entity_id,
+                            operationId=operation_id,
+                            profileSketchId=profile_sketch_id,
+                            kind="profileRegion",
+                            capSide=cap_side,
+                        ))
+    return shape, face_map
 
 
 def _sketch_revolve(arguments):
@@ -339,3 +707,37 @@ def _body(operation):
 
 def build_body(operation):
     return _body(operation)
+
+
+def build_body_with_face_map(operation) -> tuple[TopoDS_Shape, FaceMap]:
+    """Build a body and source-owned support map for supported extrusions.
+
+    Existing callers keep using :func:`build_body`.  Operators outside the
+    initial profile/region-extrusion scope still build normally and return an
+    empty map, as do legacy dimension-only and centerline-offset profiles for
+    which one authored edge does not identify exactly one generated face.
+    """
+
+    arguments = operation.arguments
+    sketch = arguments.get("sketch")
+    if (
+        operation.operator in {
+            "profile.open_profile_tube_extrude",
+            "sketch.region_extrude",
+        }
+        and sketch
+        and sketch.get("profileMode") != "centerlineThinWall"
+    ):
+        operation_id = str(getattr(operation, "id", "") or arguments.get("operationId", ""))
+        profile_sketch_id = str(
+            arguments.get("profileSketchId")
+            or sketch.get("id")
+            or getattr(operation, "profileSketchId", "")
+            or "sketch.section.main"
+        )
+        return _sketch_region_extrude_with_face_map(
+            arguments,
+            operation_id,
+            profile_sketch_id,
+        )
+    return build_body(operation), {}

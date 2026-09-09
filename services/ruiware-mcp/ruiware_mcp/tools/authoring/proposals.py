@@ -23,4 +23,6 @@ def submit(client: RuiWareApiClient, arguments: dict[str, Any]) -> dict[str, Any
     return tool_result(client.post(f"/template-drafts/{draft_id}/proposals/apply", {
         "proposal": arguments["proposal"],
         "selectedCommandIds": arguments.get("selectedCommandIds"),
+        "baseRevision": arguments["baseRevision"],
+        "confirmed": arguments["confirmed"],
     }))

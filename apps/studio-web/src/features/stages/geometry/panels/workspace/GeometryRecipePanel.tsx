@@ -9,7 +9,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import type { Draft, GeometryRecipe } from "../../../../../types";
+import type { Draft, GeometryRecipe, SemanticFaceLocator } from "../../../../../types";
 import { Field, NumberInput, PanelTitle } from "../../../../../components/ui/FormParts";
 
 const csv = (value: string) =>
@@ -17,6 +17,21 @@ const csv = (value: string) =>
     .split(/[,，]/)
     .map((item) => item.trim())
     .filter(Boolean);
+
+const PROFILE_LOCATOR_OPERATORS = new Set([
+  "profile.open_profile_tube_extrude",
+  "sketch.region_extrude",
+]);
+
+const isProfileLocatorOperation = (operator: string) =>
+  PROFILE_LOCATOR_OPERATORS.has(operator);
+
+type SemanticFaceLocatorPatch = Partial<{
+  operationId: string;
+  profileSketchId: string;
+  sourceEntityId: string;
+  capSide: "start" | "end";
+}>;
 
 type GeometryRecipePanelProps = {
   draft: Draft;
@@ -317,11 +332,17 @@ export function GeometryRecipePanel({
               <button
                 className="delete-icon"
                 title="删除算子"
-                onClick={() =>
+                onClick={() => {
+                  const deletedOperationId = op.id;
                   setRecipe({
                     operations: recipe.operations.filter((_, currentIndex) => currentIndex !== index),
-                  })
-                }
+                    semanticFaces: recipe.semanticFaces.map((face) =>
+                      face.locator?.operationId === deletedOperationId
+                        ? { ...face, locator: null }
+                        : face,
+                    ),
+                  });
+                }}
               >
                 <Trash2 size={15} />
               </button>
@@ -332,7 +353,7 @@ export function GeometryRecipePanel({
           <PanelTitle
             icon={Box}
             title="几何语义面"
-            subtitle="面 ID 是制造特征的唯一定位入口；这里定义局部 U/V 的起止边界与跨度，供端距和阵列排布直接引用。"
+            subtitle="规则仍通过语义面 ID 引用；语义面内部由来源轮廓边定位真实面，再用局部 U/V 表达端距和阵列范围。"
             actions={
               <button className="mini-btn" onClick={addSemanticFace}>
                 <Plus size={14} />
@@ -340,7 +361,136 @@ export function GeometryRecipePanel({
               </button>
             }
           />
-          {recipe.semanticFaces.map((face, index) => (
+          <div className="semantic-face-responsibilities" role="note">
+            <span><strong>来源轮廓边：</strong>决定是哪一个面</span>
+            <span><strong>局部坐标系：</strong>决定 U/V 方向</span>
+            <span><strong>U/V 边界：</strong>决定面内有效范围</span>
+          </div>
+          {recipe.semanticFaces.map((face, index) => {
+            const locator = face.locator ?? null;
+            const locatorOperations = recipe.operations.filter((operation) =>
+              isProfileLocatorOperation(operation.operator),
+            );
+            const selectedLocatorOperation = locator
+              ? recipe.operations.find((operation) => operation.id === locator.operationId)
+              : undefined;
+            const profileSketchOptions = Array.from(
+              new Set([
+                ...recipe.sketches,
+                selectedLocatorOperation?.profileSketchId,
+                locator?.profileSketchId,
+              ].filter((value): value is string => Boolean(value))),
+            );
+            const profileEdgeOptions = draft.sketch.entities
+              .filter(
+                (entity) =>
+                  !entity.construction &&
+                  entity.geometryType !== "point",
+              )
+              .map((entity) => ({ id: entity.id, label: entity.role }));
+            const profileRegionOptions = draft.sketch.regions
+              .filter((region) => region.closed)
+              .map((region) => ({ id: region.id, label: region.role }));
+            const sourceEntityOptions =
+              locator?.kind === "profileRegion"
+                ? profileRegionOptions
+                : profileEdgeOptions;
+            const sourceSketchEntity = locator?.kind === "profileEdge"
+              ? draft.sketch.entities.find((entity) => entity.id === locator.sourceEntityId)
+              : undefined;
+            const sourceRegion = locator?.kind === "profileRegion"
+              ? draft.sketch.regions.find((region) => region.id === locator.sourceEntityId)
+              : undefined;
+            const sourceEntity = sourceSketchEntity || sourceRegion;
+            const sourceEntityMissing = Boolean(
+              locator &&
+              !sourceEntity,
+            );
+            const sourceEntityCannotGenerate = Boolean(
+              locator &&
+              (locator.kind === "profileEdge"
+                ? sourceSketchEntity &&
+                  (sourceSketchEntity.construction ||
+                    sourceSketchEntity.geometryType !== "line" ||
+                    !draft.sketch.regions.some(
+                      (region) =>
+                        region.closed &&
+                        region.operation === "add" &&
+                        region.boundaryRefs.includes(locator.sourceEntityId),
+                    ))
+                : sourceRegion && (!sourceRegion.closed || sourceRegion.operation !== "add")),
+            );
+            const sourceEntityUseCount = locator
+              ? locator.kind === "profileEdge"
+                ? draft.sketch.regions.filter(
+                    (region) =>
+                      region.closed && region.boundaryRefs.includes(locator.sourceEntityId),
+                  ).length
+                : 1
+              : 0;
+            const sourceEntityAmbiguous = Boolean(
+              locator && locator.kind === "profileEdge" && sourceEntityUseCount > 1,
+            );
+            const sourceEntityInvalid =
+              sourceEntityMissing || sourceEntityCannotGenerate || sourceEntityAmbiguous;
+            const sourceEntityLabel =
+              locator?.kind === "profileRegion" ? "来源截面区域" : "来源轮廓边";
+            const sourceEntityErrorId = `semantic-face-source-error-${index}`;
+            const setLocatorKind = (kind: SemanticFaceLocator["kind"] | "") => {
+              if (!kind) {
+                editSemanticFace(index, { locator: null });
+                return;
+              }
+              const operation =
+                (locator && locatorOperations.find((item) => item.id === locator.operationId)) ||
+                locatorOperations.find((item) => item.id === face.sourceOperationId) ||
+                locatorOperations[0];
+              if (!operation) return;
+              const profileSketchId =
+                (locator?.kind === kind && locator.profileSketchId) ||
+                operation.profileSketchId ||
+                operation.sourceRefs.find((ref) => ref.startsWith("sketch.")) ||
+                recipe.sketches[0] ||
+                "sketch.section.main";
+              const sourceEntityId =
+                locator?.kind === kind && locator.sourceEntityId
+                  ? locator.sourceEntityId
+                  : kind === "profileRegion"
+                    ? profileRegionOptions[0]?.id || ""
+                    : profileEdgeOptions[0]?.id || "";
+              const nextLocator: SemanticFaceLocator =
+                kind === "profileRegion"
+                  ? {
+                      kind,
+                      operationId: operation.id,
+                      profileSketchId,
+                      sourceEntityId,
+                      capSide:
+                        locator?.kind === "profileRegion"
+                          ? locator.capSide
+                          : face.id === "part.endFace.end"
+                            ? "end"
+                            : "start",
+                    }
+                  : {
+                      kind,
+                      operationId: operation.id,
+                      profileSketchId,
+                      sourceEntityId,
+                    };
+              editSemanticFace(index, {
+                sourceOperationId: operation.id,
+                locator: nextLocator,
+              });
+            };
+            const setLocator = (patch: SemanticFaceLocatorPatch) => {
+              if (!locator) return;
+              editSemanticFace(index, {
+                locator: { ...locator, ...patch } as SemanticFaceLocator,
+                ...(patch.operationId ? { sourceOperationId: patch.operationId } : {}),
+              });
+            };
+            return (
             <div className="semantic-face-row" key={`${face.id}-${index}`}>
               <div className="semantic-face-identity">
                 <Field label="稳定 ID">
@@ -375,6 +525,129 @@ export function GeometryRecipePanel({
                   </select>
                 </Field>
               </div>
+              <fieldset className="semantic-face-locator">
+                <legend>来源轮廓边绑定（可选）</legend>
+                <Field
+                  label="来源类型"
+                  hint="profileEdge 生成纵向侧面；profileRegion 生成拉伸端面。"
+                >
+                  <select
+                    value={locator?.kind ?? ""}
+                    onChange={(event) =>
+                      setLocatorKind(
+                        event.target.value as SemanticFaceLocator["kind"] | "",
+                      )
+                    }
+                  >
+                    <option value="">未设置（兼容旧草稿）</option>
+                    <option value="profileEdge" disabled={!profileEdgeOptions.length}>
+                      profileEdge · 截面轮廓边
+                    </option>
+                    <option value="profileRegion" disabled={!profileRegionOptions.length}>
+                      profileRegion · 截面区域
+                    </option>
+                  </select>
+                </Field>
+                {locator ? (
+                  <>
+                    <Field label="来源算子">
+                      <select
+                        value={locator.operationId}
+                        onChange={(event) => setLocator({ operationId: event.target.value })}
+                      >
+                        {!locatorOperations.some((item) => item.id === locator.operationId) && (
+                          <option value={locator.operationId}>
+                            {locator.operationId}
+                            {selectedLocatorOperation && !isProfileLocatorOperation(selectedLocatorOperation.operator)
+                              ? "（旧草稿）"
+                              : "（当前不可用）"}
+                          </option>
+                        )}
+                        {locatorOperations.map((operation) => (
+                          <option key={operation.id} value={operation.id}>
+                            {operation.id} · {operation.operator}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="截面草图">
+                      <select
+                        value={locator.profileSketchId}
+                        onChange={(event) => setLocator({ profileSketchId: event.target.value })}
+                      >
+                        {!profileSketchOptions.includes(locator.profileSketchId) && (
+                          <option value={locator.profileSketchId}>{locator.profileSketchId}</option>
+                        )}
+                        {profileSketchOptions.map((sketchId) => (
+                          <option key={sketchId} value={sketchId}>{sketchId}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field
+                      label={sourceEntityLabel}
+                      hint="选项格式：稳定 ID · 工程名称"
+                    >
+                      <>
+                        <select
+                          value={locator.sourceEntityId}
+                          aria-invalid={sourceEntityInvalid}
+                          aria-describedby={sourceEntityInvalid ? sourceEntityErrorId : undefined}
+                          data-semantic-face-id={face.id}
+                          className={sourceEntityInvalid ? "semantic-source-select invalid" : "semantic-source-select"}
+                          onChange={(event) => setLocator({ sourceEntityId: event.target.value })}
+                        >
+                          {sourceEntityMissing && (
+                            <option value={locator.sourceEntityId}>
+                              {locator.sourceEntityId
+                                ? `${locator.sourceEntityId} · 来源不存在`
+                                : "未选择来源（错误）"}
+                            </option>
+                          )}
+                          {sourceEntityOptions.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.id} · {item.label}
+                            </option>
+                          ))}
+                        </select>
+                        {sourceEntityInvalid && (
+                          <small
+                            id={sourceEntityErrorId}
+                            className="field-error"
+                            role="alert"
+                          >
+                            {sourceEntityMissing
+                              ? locator.sourceEntityId
+                                ? `${sourceEntityLabel}不存在：${locator.sourceEntityId}`
+                                : `请选择${sourceEntityLabel}`
+                              : sourceEntityCannotGenerate
+                                ? `${sourceEntityLabel}无法生成面：当前仅支持闭合加材区域或直线轮廓边`
+                                : `${sourceEntityLabel}一个定位器命中多个面：${locator.sourceEntityId}`}
+                          </small>
+                        )}
+                      </>
+                    </Field>
+                    {locator.kind === "profileRegion" && (
+                      <Field label="拉伸端面">
+                        <select
+                          value={locator.capSide}
+                          onChange={(event) =>
+                            setLocator({
+                              capSide: event.target.value as "start" | "end",
+                            })
+                          }
+                        >
+                          <option value="start">起始端面</option>
+                          <option value="end">终止端面</option>
+                        </select>
+                      </Field>
+                    )}
+                  </>
+                ) : (
+                  <small className="semantic-face-locator-legacy">
+                    旧草稿未声明来源轮廓边；hostFrame 与 U/V 参数仍按原语义保留。
+                  </small>
+                )}
+              </fieldset>
               <div className="semantic-face-bounds">
                 <fieldset className="semantic-axis-group">
                   <legend>U 方向</legend>
@@ -439,7 +712,8 @@ export function GeometryRecipePanel({
                 <Trash2 size={15} />
               </button>
             </div>
-          ))}
+            );
+          })}
         </section>
         <label className="confirm-box">
           <input

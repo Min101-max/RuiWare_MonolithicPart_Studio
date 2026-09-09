@@ -23,7 +23,7 @@ def payload(result): return json.loads(result["content"][0]["text"])
 def test_create_template_is_registered_and_selects_workspace():
     assert any(tool["name"] == "create_template" for tool in TOOLS)
     client = FakeClient()
-    result = payload(McpApplication(client).call_tool("create_template", {"name": "测试专用"}))
+    result = payload(McpApplication(client).call_tool("create_template", {"name": "测试专用", "confirmed": True}))
     assert result["draft"]["name"] == "测试专用"
     assert result["workspace"]["draft"]["name"] == "测试专用"
-    assert client.calls == [("POST", "/template-drafts/create", {"name": "测试专用"}), ("PUT", "/workspace/current-draft", {"draftId": "draft-1"}), ("GET", "/workspace/current-draft", None)]
+    assert client.calls == [("POST", "/template-drafts/create", {"name": "测试专用", "confirmed": True}), ("PUT", "/workspace/current-draft", {"draftId": "draft-1", "confirmed": True}), ("GET", "/workspace/current-draft", None)]

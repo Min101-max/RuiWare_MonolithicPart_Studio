@@ -14,7 +14,7 @@ from ..ai_actions import AIModelProposal, ProposalError, apply_proposal, proposa
 from ..config import ARTIFACT_ROOT, ATTACHMENT_ROOT
 from ..errors import api_error
 from ..repository import Repository
-from ._common import draft_or_404, save_draft
+from ._common import draft_or_404, ensure_draft_revision, save_draft
 from .compile import run_cad_worker as run_cad_worker_service, write_source_package as write_source_package_service
 from .context import nominal_material_context, validate_stage_with_context
 from .proposal import sync_sketch_seed_coordinates
@@ -28,8 +28,14 @@ def download_source_package(repository: Repository, draft_id: str) -> Path:
     return write_source_package(repository, draft_or_404(repository, draft_id))
 
 
-def compile_template_draft(repository: Repository, draft_id: str, artifact_root: Path = ARTIFACT_ROOT) -> CompileResult:
+def compile_template_draft(
+    repository: Repository,
+    draft_id: str,
+    artifact_root: Path = ARTIFACT_ROOT,
+    expected_revision: int | None = None,
+) -> CompileResult:
     draft = draft_or_404(repository, draft_id)
+    ensure_draft_revision(draft, expected_revision)
     required = STAGE_ORDER[:5]
     missing = [stage for stage in required if getattr(draft.stageStatus, stage) != "complete"]
     if missing:
@@ -47,6 +53,7 @@ def compile_template_draft(repository: Repository, draft_id: str, artifact_root:
         result = run_cad_worker_service(plan, artifact_root)
     if not result.success and previous is not None:
         result = result.model_copy(update={"artifacts": previous.artifacts, "metrics": previous.metrics})
+    ensure_draft_revision(draft_or_404(repository, draft_id), expected_revision)
     repository.record_compile(draft.id, result.model_dump())
     return result
 
@@ -93,8 +100,15 @@ def list_published_versions(repository: Repository, draft_id: str) -> list[Publi
     return repository.list_versions(draft_id)
 
 
-def publish_template(repository: Repository, draft_id: str, artifact_root: Path = ARTIFACT_ROOT, attachment_root: Path = ATTACHMENT_ROOT):
+def publish_template(
+    repository: Repository,
+    draft_id: str,
+    artifact_root: Path = ARTIFACT_ROOT,
+    attachment_root: Path = ATTACHMENT_ROOT,
+    expected_revision: int | None = None,
+):
     draft = draft_or_404(repository, draft_id)
+    ensure_draft_revision(draft, expected_revision)
     if draft.lifecycleStatus == "published" and draft.stageStatus.admission == "complete":
         raise api_error("PUBLISH_ALREADY_PUBLISHED", status_code=409)
     validation = validate_stage_with_context(repository, "admission", draft)
@@ -104,7 +118,12 @@ def publish_template(repository: Repository, draft_id: str, artifact_root: Path 
     if latest is None:
         raise api_error("COMPILE_RECORD_MISSING", status_code=422)
     status = draft.stageStatus.model_copy(update={"admission": "complete"})
-    released = save_draft(repository, draft.model_copy(update={"stageStatus": status, "lifecycleStatus": "published"}), reason="publish")
+    released = save_draft(
+        repository,
+        draft.model_copy(update={"stageStatus": status, "lifecycleStatus": "published"}),
+        reason="publish",
+        expected_revision=expected_revision,
+    )
     package = write_source_package_service(released, repository, artifact_root, attachment_root)
     version = repository.publish(released, latest, f"/artifacts/packages/{package.name}")
     return released, version, validation

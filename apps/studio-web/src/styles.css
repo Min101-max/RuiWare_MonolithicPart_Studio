@@ -1433,11 +1433,30 @@ code {
 .face-binding-option strong { font-size: 8px; }
 .face-binding-option code { font-size: 7px; color: #64727b; }
 .semantic-face-contract { margin-top: 12px; }
+.semantic-face-responsibilities {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid #dce7eb;
+  border-radius: 6px;
+  background: #f7fafb;
+  color: #53636c;
+  font-size: 8px;
+}
+.semantic-face-responsibilities span {
+  min-width: 0;
+}
+.semantic-face-responsibilities strong {
+  color: #26383f;
+}
 .semantic-face-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 32px;
   grid-template-areas:
     "identity delete"
+    "locator delete"
     "bounds delete";
   align-items: start;
   column-gap: 12px;
@@ -1459,6 +1478,47 @@ code {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+.semantic-face-locator {
+  grid-area: locator;
+  min-width: 0;
+  margin: 0;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  border: 1px solid #e0e5e8;
+  border-radius: 6px;
+}
+.semantic-face-locator legend {
+  grid-column: 1 / -1;
+  padding: 0 4px;
+  font-size: 8px;
+  font-weight: 700;
+  color: #53636c;
+}
+.semantic-face-locator .field,
+.semantic-face-locator-legacy {
+  min-width: 0;
+  margin-bottom: 0;
+}
+.semantic-face-locator-legacy {
+  grid-column: 2 / -1;
+  align-self: end;
+  color: #7b878e;
+  font-size: 8px;
+}
+.semantic-face-locator input,
+.semantic-face-locator select {
+  min-width: 0;
+  width: 100%;
+  padding: 6px 7px;
+  font-size: 8px;
+}
+.semantic-face-locator .semantic-source-select.invalid {
+  border-color: #c66a62;
+  background: #fff7f6;
+  color: #923f39;
 }
 .semantic-axis-group {
   min-width: 0;
@@ -1627,6 +1687,9 @@ code {
   }
   .face-binding-list { grid-column: auto; }
   .semantic-face-identity { grid-template-columns: 1fr; }
+  .semantic-face-responsibilities { grid-template-columns: 1fr; }
+  .semantic-face-locator { grid-template-columns: 1fr; }
+  .semantic-face-locator-legacy { grid-column: auto; }
   .semantic-face-bounds { grid-template-columns: 1fr; }
   .dimension-row { grid-template-columns: 1fr; }
   .rule-local-preview { grid-template-columns: 1fr; }

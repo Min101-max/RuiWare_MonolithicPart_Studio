@@ -97,6 +97,7 @@ class BindingRequest(BaseModel):
 
 class NewDraftRequest(BaseModel):
     name: str = "未命名零部件模板"
+    confirmed: bool = False
 
 
 class NamedDraftResponse(BaseModel):
@@ -107,6 +108,7 @@ class NamedDraftResponse(BaseModel):
 
 class CurrentDraftRequest(BaseModel):
     draftId: str = Field(min_length=1)
+    confirmed: bool = False
 
 
 class StageActionResult(BaseModel):
@@ -126,7 +128,13 @@ class ProposalPreviewRequest(BaseModel):
 
 
 class ProposalApplyRequest(ProposalPreviewRequest):
-    pass
+    baseRevision: int | None = Field(default=None, ge=1)
+    confirmed: bool = False
+
+
+class GuardedActionRequest(BaseModel):
+    baseRevision: int | None = Field(default=None, ge=1)
+    confirmed: bool = False
 
 
 class EvaluationRequest(BaseModel):
@@ -390,8 +398,11 @@ def create_blank_template_draft(request: NewDraftRequest):
 
 
 @app.post("/api/v1/template-drafts/create", response_model=NamedDraftResponse, status_code=201)
-def create_named_template_draft(request: NewDraftRequest):
-    draft, created = create_named_template_draft_service(repository, request.name)
+def create_named_template_draft(body: NewDraftRequest, request: Request):
+    context = parse_write_context(request, body.model_dump())
+    if context.actor == "agent" and not context.confirmed:
+        raise api_error("WRITE_CONFIRMATION_REQUIRED", status_code=422)
+    draft, created = create_named_template_draft_service(repository, body.name)
     return NamedDraftResponse(draft=draft, created=created, idempotent=not created)
 
 
@@ -406,8 +417,11 @@ def get_current_workspace_draft():
 
 
 @app.put("/api/v1/workspace/current-draft")
-def set_current_workspace_draft(request: CurrentDraftRequest):
-    return set_current_draft_service(repository, request.draftId)
+def set_current_workspace_draft(body: CurrentDraftRequest, request: Request):
+    context = parse_write_context(request, body.model_dump())
+    if context.actor == "agent" and not context.confirmed:
+        raise api_error("WRITE_CONFIRMATION_REQUIRED", status_code=422)
+    return set_current_draft_service(repository, body.draftId)
 
 
 @app.post("/api/v1/template-drafts", response_model=TemplateDraft, status_code=201)
@@ -498,8 +512,10 @@ def apply_parameter_changes(draft_id: str, request: ParameterChangesRequest):
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/stages/{stage}/complete", response_model=StageActionResult)
-def complete_template_stage(draft_id: str, stage: StageName):
-    draft, validation = complete_template_stage_service(repository, stage, draft_id)
+def complete_template_stage(draft_id: str, stage: StageName, request: Request, body: GuardedActionRequest | None = None):
+    context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    draft, validation = complete_template_stage_service(repository, stage, draft_id, expected_revision)
     return StageActionResult(draft=draft, validation=validation)
 
 
@@ -546,8 +562,10 @@ def download_source_package(draft_id: str):
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/compile", response_model=CompileResult)
-def compile_template_draft(draft_id: str):
-    return compile_template_draft_service(repository, draft_id, ARTIFACT_ROOT)
+def compile_template_draft(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
+    context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    return compile_template_draft_service(repository, draft_id, ARTIFACT_ROOT, expected_revision)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/evaluate", response_model=TemplateEvaluation)
@@ -583,11 +601,15 @@ def preview_proposal(draft_id: str, request: ProposalPreviewRequest):
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/proposals/apply", response_model=TemplateDraft)
-def apply_template_proposal(draft_id: str, request: ProposalApplyRequest):
-    return apply_template_proposal_service(repository, draft_id, request.proposal, request.selectedCommandIds)
+def apply_template_proposal(draft_id: str, body: ProposalApplyRequest, request: Request):
+    context = parse_write_context(request, body.model_dump(), require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    return apply_template_proposal_service(repository, draft_id, body.proposal, body.selectedCommandIds, expected_revision)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/publish", response_model=PublishResult)
-def publish_template(draft_id: str):
-    released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT)
+def publish_template(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
+    context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision)
     return PublishResult(draft=released, version=version, validation=validation)
