@@ -9,6 +9,7 @@ from .operations import (
     compile_template_draft,
     complete_template_stage,
     create_blank_template_draft,
+    create_named_template_draft,
     create_material_binding,
     create_template_draft,
     download_source_package,
@@ -25,6 +26,7 @@ from .operations import (
     resolve_material_binding,
     restore_template_draft,
     restore_template_revision,
+    rollback_template_revision,
     search_materials,
     update_template_attachment,
     update_template_draft,
@@ -32,3 +34,4 @@ from .operations import (
     write_source_package,
 )
 from .proposal import apply_structured_proposal, sync_sketch_seed_coordinates
+from .parameters import apply_parameter_changes, parameter_contract, preview_parameter_changes, validate_parameter_values

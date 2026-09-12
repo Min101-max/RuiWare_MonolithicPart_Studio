@@ -86,6 +86,8 @@ export default function App() {
   const {
     drafts,
     draft,
+    loading,
+    loadError,
     stage,
     validation,
     compile,
@@ -99,13 +101,16 @@ export default function App() {
     busy,
     notice,
     error,
+    syncConflict,
     setStage,
     setMaterials,
     setMaterialSearch,
     setError,
     setNotice,
+    resolveSyncConflict,
     chooseDraft,
     change,
+    adoptSavedDraft,
     update,
     save,
     check,
@@ -117,12 +122,25 @@ export default function App() {
     runCompile,
     publish,
     showError,
+    reload,
   } = useDraftWorkspace();
   if (!draft)
     return (
       <div className="loading-screen">
-        <LoaderCircle className="spin" />
-        正在载入单体零部件模板平台…
+        {loading ? (
+          <>
+            <LoaderCircle className="spin" />
+            正在载入单体零部件模板平台…
+          </>
+        ) : (
+          <>
+            <p>{loadError?.message || "零部件数据加载失败"}</p>
+            <button className="primary-btn" onClick={() => void reload()}>
+              <RefreshCw size={15} />
+              重新加载
+            </button>
+          </>
+        )}
       </div>
     );
   const stageIndex = STAGES.findIndex((x) => x.id === stage);
@@ -142,6 +160,7 @@ export default function App() {
       dirty={dirty}
       notice={notice}
       error={error}
+      syncConflict={syncConflict}
       onSelectDraft={(draftId) => {
         const selected = drafts.find((item) => item.id === draftId);
         if (selected) chooseDraft(selected);
@@ -155,6 +174,7 @@ export default function App() {
         setError(null);
         setNotice("");
       }}
+      onResolveSyncConflict={resolveSyncConflict}
       sourcePackageUrl={api.sourcePackageUrl(draft.id!)}
     >
         <div className="stage-heading">
@@ -246,6 +266,7 @@ export default function App() {
                 draft={draft}
                 change={change}
                 save={save}
+                onAdoptSavedDraft={adoptSavedDraft}
                 dirty={dirty}
                 showError={showError}
               />

@@ -10,6 +10,7 @@ import {
   sampleSweepPathGeometry,
   validateSweepPathTopology,
 } from "../../../sketch/sweepPathTopology";
+
 export const SOURCE_LABELS: Record<ParameterSource["type"], string> = {
   userInput: "实例输入",
   materialProperty: "材料属性",
@@ -25,6 +26,8 @@ export const SOURCE_LABELS: Record<ParameterSource["type"], string> = {
 };
 export const OPERATORS = [
   ["profile.open_profile_tube_extrude", "开口型材/管材拉伸", "available"],
+  ["sketch.region_extrude", "参数化草图区域拉伸", "available"],
+  ["profile.rectangular_tube_extrude", "矩形管拉伸", "available"],
   ["sheet.blank_extrude", "板坯拉伸", "available"],
   ["solid.revolve", "旋转体", "available"],
   ["solid.sweep", "路径扫掠", "available"],
@@ -54,6 +57,33 @@ export const scalar = (value: string): string | number | boolean => {
   return value.trim() !== "" && Number.isFinite(number) ? number : value;
 };
 export const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
+
+export const clearDanglingSemanticFaceLocators = (
+  recipe: GeometryRecipe,
+  sketch: Draft["sketch"],
+): GeometryRecipe => {
+  const entityIds = new Set(sketch.entities.map((entity) => entity.id));
+  const regionIds = new Set(sketch.regions.map((region) => region.id));
+  const operations = new Map(recipe.operations.map((operation) => [operation.id, operation]));
+  const declaredSketches = new Set(recipe.sketches);
+  return {
+    ...recipe,
+    semanticFaces: recipe.semanticFaces.map((face) => {
+      const locator = face.locator;
+      if (!locator) return face;
+      const operation = operations.get(locator.operationId);
+      const sourceExists =
+        locator.kind === "profileEdge"
+          ? entityIds.has(locator.sourceEntityId)
+          : regionIds.has(locator.sourceEntityId);
+      const locatorIsUsable =
+        sourceExists &&
+        declaredSketches.has(locator.profileSketchId) &&
+        !!operation;
+      return locatorIsUsable ? face : { ...face, locator: null };
+    }),
+  };
+};
 
 export const createEmptySweepPath = (): SweepPathSketch => ({
   id: "path.main",

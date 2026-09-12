@@ -109,6 +109,7 @@ export type ParameterDefinition = {
   scope?: "template" | "partInstance" | "component" | "product" | "projectZone";
   declaredInRuleStage?: boolean;
   contractReady?: boolean;
+  ruleDefaultFor?: string | null;
   description?: string;
 };
 export type VariantDefinition = {
@@ -302,6 +303,34 @@ export type SweepPathSketch = {
   generationStatus?: "idle" | "generating" | "failed" | "succeeded";
   diagnostics: Diagnostic[];
 };
+type SemanticFaceLocatorBase = {
+  operationId: string;
+  profileSketchId: string;
+  sourceEntityId: string;
+};
+export type SemanticFaceLocator =
+  | (SemanticFaceLocatorBase & {
+      kind: "profileEdge";
+      /** Python's JSON model includes null for this non-applicable field. */
+      capSide?: null;
+    })
+  | (SemanticFaceLocatorBase & {
+      kind: "profileRegion";
+      /** Distinguishes the two caps made from one profile region. */
+      capSide: "start" | "end";
+    });
+export type SemanticFaceDefinition = {
+  id: string;
+  label: string;
+  hostFrame: "negativeY" | "positiveY" | "negativeX" | "positiveX" | "negativeZ" | "positiveZ";
+  sourceOperationId: string;
+  /** Missing on legacy drafts created before source-profile face binding. */
+  locator?: SemanticFaceLocator | null;
+  uStartExpression: string;
+  uSpanExpression: string;
+  vStartExpression: string;
+  vSpanExpression: string;
+};
 export type GeometryRecipe = {
   id: string;
   constructionMode:
@@ -332,16 +361,7 @@ export type GeometryRecipe = {
     twistMode?: "none";
     cornerMode?: "right";
   }[];
-  semanticFaces: {
-    id: string;
-    label: string;
-    hostFrame: "negativeY" | "positiveY" | "negativeX" | "positiveX" | "negativeZ" | "positiveZ";
-    sourceOperationId: string;
-    uStartExpression: string;
-    uSpanExpression: string;
-    vStartExpression: string;
-    vSpanExpression: string;
-  }[];
+  semanticFaces: SemanticFaceDefinition[];
   reviewed: boolean;
 };
 export type FeatureRule = {
@@ -397,6 +417,12 @@ export type ResolvedFeature = {
   arguments: Record<string, string | number | boolean>;
   semanticFaceId: string;
   hostFace: "negativeY" | "positiveY" | "negativeX" | "positiveX" | "negativeZ" | "positiveZ";
+  locator?: SemanticFaceLocator | null;
+  resolvedSourceEntityId?: string | null;
+  resolvedUStart?: number | null;
+  resolvedUSpan?: number | null;
+  resolvedVStart?: number | null;
+  resolvedVSpan?: number | null;
   polygonVertices: [number, number][];
   sourceRuleId: string;
   index: number;
@@ -424,6 +450,31 @@ export type EvaluationRequest = {
   product?: Record<string, unknown>;
   component?: Record<string, unknown>;
   projectZone?: Record<string, unknown>;
+};
+
+export type ParameterChange = { parameterId: string; value: string | number | boolean; unit?: string };
+export type ParameterContract = {
+  draftId: string;
+  revision: number;
+  parameters: ParameterDefinition[];
+  variants: { id: string; name: string; overrides: Record<string, string | number | boolean>; expected: "valid" | "invalid" }[];
+};
+export type ParameterValidationResult = {
+  draftId: string;
+  revision: number;
+  values: Record<string, string | number | boolean>;
+  changes: ParameterChange[];
+  evaluation: TemplateEvaluation;
+  valid: boolean;
+};
+export type ParameterPreviewResult = {
+  draftId: string;
+  baseRevision: number;
+  changes: ParameterChange[];
+  candidate: Draft;
+  evaluation: TemplateEvaluation;
+  downstreamValidations: Record<StageName, StageValidation>;
+  canAccept: boolean;
 };
 
 export type Draft = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 Scalar = int | float | bool | str
@@ -133,6 +133,7 @@ class ParameterDefinition(BaseModel):
     scope: Literal["template", "partInstance", "component", "product", "projectZone"] = "partInstance"
     declaredInRuleStage: bool = False
     contractReady: bool = True
+    ruleDefaultFor: str | None = None
     description: str = ""
 
     @model_validator(mode="after")
@@ -184,6 +185,26 @@ class GeometryOperationDefinition(BaseModel):
     cornerMode: Literal["right"] = "right"
 
 
+class SemanticFaceLocator(BaseModel):
+    """Stable authored source for an extruded semantic face."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["profileEdge", "profileRegion"]
+    operationId: str = Field(pattern=r"^[A-Za-z0-9_.-]+$")
+    profileSketchId: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    sourceEntityId: str = Field(pattern=r"^[A-Za-z][A-Za-z0-9_.-]*$")
+    capSide: Literal["start", "end"] | None = None
+
+    @model_validator(mode="after")
+    def validate_locator_shape(self) -> "SemanticFaceLocator":
+        if self.kind == "profileRegion" and self.capSide is None:
+            raise ValueError("profileRegion locator requires capSide")
+        if self.kind == "profileEdge" and self.capSide is not None:
+            raise ValueError("profileEdge locator cannot define capSide")
+        return self
+
+
 class SemanticFaceDefinition(BaseModel):
     """A stable local U/V contract authored with geometry, never inferred from face index."""
 
@@ -191,6 +212,7 @@ class SemanticFaceDefinition(BaseModel):
     label: str
     hostFrame: Literal["negativeY", "positiveY", "negativeX", "positiveX", "negativeZ", "positiveZ"]
     sourceOperationId: str = "body.main"
+    locator: SemanticFaceLocator | None = None
     uStartExpression: str = "-sectionWidth / 2"
     uSpanExpression: str = "sectionWidth"
     vStartExpression: str = "0"
@@ -207,12 +229,12 @@ class GeometryRecipe(BaseModel):
     paths: list[str] = Field(default_factory=list)
     operations: list[GeometryOperationDefinition] = Field(default_factory=list)
     semanticFaces: list[SemanticFaceDefinition] = Field(default_factory=lambda: [
-        SemanticFaceDefinition(id="part.face.front", label="前侧面", hostFrame="negativeY", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.face.back", label="后侧面", hostFrame="positiveY", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.face.left", label="左侧面", hostFrame="negativeX", uStartExpression="-sectionHeight / 2", uSpanExpression="sectionHeight", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.face.right", label="右侧面", hostFrame="positiveX", uStartExpression="-sectionHeight / 2", uSpanExpression="sectionHeight", vStartExpression="0", vSpanExpression="length"),
-        SemanticFaceDefinition(id="part.endFace.start", label="起始端面", hostFrame="negativeZ", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="-sectionHeight / 2", vSpanExpression="sectionHeight"),
-        SemanticFaceDefinition(id="part.endFace.end", label="终止端面", hostFrame="positiveZ", uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="-sectionHeight / 2", vSpanExpression="sectionHeight"),
+        SemanticFaceDefinition(id="part.face.front", label="前侧面", hostFrame="negativeY", locator={"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.bottom"}, uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.face.back", label="后侧面", hostFrame="positiveY", locator={"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.top"}, uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.face.left", label="左侧面", hostFrame="negativeX", locator={"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.left"}, uStartExpression="-sectionHeight / 2", uSpanExpression="sectionHeight", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.face.right", label="右侧面", hostFrame="positiveX", locator={"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.right"}, uStartExpression="-sectionHeight / 2", uSpanExpression="sectionHeight", vStartExpression="0", vSpanExpression="length"),
+        SemanticFaceDefinition(id="part.endFace.start", label="起始端面", hostFrame="negativeZ", locator={"kind": "profileRegion", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "section.region.main", "capSide": "start"}, uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="-sectionHeight / 2", vSpanExpression="sectionHeight"),
+        SemanticFaceDefinition(id="part.endFace.end", label="终止端面", hostFrame="positiveZ", locator={"kind": "profileRegion", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "section.region.main", "capSide": "end"}, uStartExpression="-sectionWidth / 2", uSpanExpression="sectionWidth", vStartExpression="-sectionHeight / 2", vSpanExpression="sectionHeight"),
     ])
     reviewed: bool = False
 
@@ -336,6 +358,12 @@ class ResolvedFeature(BaseModel):
     arguments: dict[str, Scalar]
     semanticFaceId: str
     hostFace: Literal["negativeY", "positiveY", "negativeX", "positiveX", "negativeZ", "positiveZ"] = "negativeY"
+    locator: SemanticFaceLocator | None = None
+    resolvedSourceEntityId: str | None = None
+    resolvedUStart: float | None = None
+    resolvedUSpan: float | None = None
+    resolvedVStart: float | None = None
+    resolvedVSpan: float | None = None
     polygonVertices: list[tuple[float, float]] = Field(default_factory=list)
     sourceRuleId: str
     index: int

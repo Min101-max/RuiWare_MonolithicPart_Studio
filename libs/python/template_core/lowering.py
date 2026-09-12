@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
-from typing import Any
+from typing import Any, NamedTuple
 
 from .models import CanonicalPlan, Diagnostic, StaticOperation, TemplateDraft
 from .rules import RuleEvaluationError, evaluate_expression, evaluate_template
@@ -11,8 +11,20 @@ from .sketch_solver import solve_semantic_sketch
 from .sweep_path import ordered_path_points, validate_sweep_path
 from .sweep_path_sampling import (
     map_point_to_3d,
+    ordered_path_segments_3d,
     sample_ordered_path_data,
 )
+
+
+class _SampledPathPayload(NamedTuple):
+    path_points: str
+    segment_kinds: list[str]
+    segment_geometry_ids: list[str]
+    sampled_segments: list[dict[str, Any]]
+    segment_tangents: list[tuple[float, float, float] | None]
+    station_tangents: list[tuple[float, float, float] | None]
+    structured_segments: list[dict[str, Any]]
+    exact_geometry_error: str | None
 
 
 def canonical_json(value: Any) -> str:
@@ -57,16 +69,13 @@ def _resolve_structured_geometry_argument(
     return ";".join(rows)
 
 
-def _sampled_path_payload(path_sketch) -> tuple[str, list[str], list[str], list[dict[str, Any]], list[tuple[float, float] | None], list[tuple[float, float] | None]]:
-    """Sample an ordered authored path and retain segment provenance.
+def _sampled_path_payload(path_sketch) -> _SampledPathPayload:
+    """Lower exact path segments alongside the compatible sampled payload.
 
-    The CAD worker intentionally consumes a polyline during this first arc
-    implementation.  ``sample_ordered_path_data`` is the single source of
-    truth for arc sampling; this helper only maps its output into the legacy
-    worker string format and records which sampled edges came from an authored
-    line versus an arc.  The provenance lets the worker apply RightCorner to
-    actual line/polyline vertices without treating every arc sample as a
-    sharp corner.
+    ``pathPoints`` and its per-chord provenance remain available to older CAD
+    workers and as an explicit fallback representation.  The final tuple item
+    contains one parameterized arc record (or exact line record) per authored
+    path segment for workers capable of constructing a true geometric wire.
     """
     topology = validate_sweep_path(path_sketch)
     ordered = topology.get("ordered", [])
@@ -97,6 +106,19 @@ def _sampled_path_payload(path_sketch) -> tuple[str, list[str], list[str], list[
         if isinstance(tangent, (list, tuple)) and len(tangent) >= 2 else None
         for tangent in sampled_data.get("stationTangents2d", [])
     ]
+    structured_segments: list[dict[str, Any]] = []
+    exact_geometry_error: str | None = None
+    if topology.get("valid", False):
+        try:
+            structured_segments = ordered_path_segments_3d(
+                path_sketch,
+                ordered,
+                xy_as_xz=True,
+            )
+        except (TypeError, ValueError) as error:
+            # A valid topology that cannot be represented exactly must not be
+            # silently reclassified as a precise polyline path.
+            exact_geometry_error = str(error)
 
     if len(mapped) < 2:
         # Legacy drafts may not have a graph order (for example while a path
@@ -110,14 +132,23 @@ def _sampled_path_payload(path_sketch) -> tuple[str, list[str], list[str], list[
         station_tangents = [None] * len(mapped)
 
     if len(mapped) < 2:
-        return "", [], [], [], [], []
+        return _SampledPathPayload("", [], [], [], [], [], [], exact_geometry_error)
     encoded = ";".join(":".join(str(float(component)) for component in point) for point in mapped)
-    return encoded, segment_kinds, segment_geometry_ids, segment_records, segment_tangents, station_tangents
+    return _SampledPathPayload(
+        encoded,
+        segment_kinds,
+        segment_geometry_ids,
+        segment_records,
+        segment_tangents,
+        station_tangents,
+        structured_segments,
+        exact_geometry_error,
+    )
 
 
 def _path_points_from_sketch(path_sketch) -> str:
     """Convert the authored 2D sweep path into the worker's 3D point string."""
-    return _sampled_path_payload(path_sketch)[0]
+    return _sampled_path_payload(path_sketch).path_points
 
 
 def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
@@ -157,6 +188,45 @@ def _precheck(draft: TemplateDraft, values: dict[str, Any]) -> list[Diagnostic]:
     return diagnostics
 
 
+def _referenced_semantic_face_locator_diagnostics(
+    draft: TemplateDraft, referenced_face_ids: set[str]
+) -> list[Diagnostic]:
+    """Validate locators that are about to enter manufacturing operations.
+
+    Stage validation checks every authored semantic face.  Lowering repeats the
+    check only for faces used by resolved features so an invalid stable source
+    cannot reach CAD, while unrelated legacy/sweep definitions remain outside
+    the extrusion-only locator contract.
+    """
+
+    if not referenced_face_ids:
+        return []
+
+    # Keep the reference rules in one place.  The local import also prevents
+    # lowering/stage module initialization from becoming coupled.
+    from .stages import _validate_semantic_face_locators
+
+    diagnostics: list[Diagnostic] = []
+    faces = {
+        face.id: face
+        for face in draft.geometryRecipe.semanticFaces
+        if face.id in referenced_face_ids and face.locator is not None
+    }
+    for face_id, face in sorted(faces.items()):
+        recipe = draft.geometryRecipe.model_copy(update={"semanticFaces": [face]})
+        scoped_draft = draft.model_copy(update={"geometryRecipe": recipe})
+        valid, message = _validate_semantic_face_locators(scoped_draft)
+        if not valid:
+            diagnostics.append(Diagnostic(
+                severity="error",
+                code="SEMANTIC_FACE_LOCATOR_INVALID",
+                path=f"geometryRecipe.semanticFaces.{face_id}.locator",
+                message=message,
+                suggestion="修复来源操作、截面草图或稳定实体/区域 ID 后重新生成计划。",
+            ))
+    return diagnostics
+
+
 def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> CanonicalPlan:
     material_snapshot = stable_material_snapshot(material_snapshot)
     external_context = {
@@ -187,6 +257,10 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
         Diagnostic(severity=item.severity, code=item.code, path=item.path, message=item.message)
         for item in evaluation.diagnostics
     )
+    diagnostics.extend(_referenced_semantic_face_locator_diagnostics(
+        draft,
+        {feature.semanticFaceId for feature in evaluation.features},
+    ))
     operations: list[StaticOperation] = []
     geometry_context = {**external_context, **evaluation.values}
     for definition in draft.geometryRecipe.operations:
@@ -202,7 +276,7 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
                     "twistMode": definition.twistMode,
                     "cornerMode": definition.cornerMode,
                 })
-            sampled_path_payload: tuple[str, list[str], list[str], list[dict[str, Any]], list[tuple[float, float] | None], list[tuple[float, float] | None]] | None = None
+            sampled_path_payload: _SampledPathPayload | None = None
             if definition.operator == "solid.sweep" and draft.sweepPath is not None:
                 path_id = definition.pathSketchId or "path.main"
                 if path_id == draft.sweepPath.id or draft.sweepPath.id in definition.sourceRefs:
@@ -220,17 +294,37 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
             # points so the worker can distinguish true line corners from arc
             # tessellation stations.
             if sampled_path_payload is not None:
-                generated_path, segment_kinds, segment_geometry_ids, segment_records, segment_tangents, station_tangents = sampled_path_payload
-                if generated_path:
-                    arguments["pathPoints"] = generated_path
-                    arguments["pathSegmentKinds"] = segment_kinds
-                    arguments["pathSegmentGeometryIds"] = segment_geometry_ids
-                    arguments["pathSegments"] = segment_records
-                    arguments["pathSegmentTangents"] = segment_tangents
-                    arguments["pathStationTangents"] = station_tangents
+                if sampled_path_payload.exact_geometry_error is not None:
+                    diagnostics.append(Diagnostic(
+                        severity="error",
+                        code="SWEEP_PATH_EXACT_GEOMETRY_LOWERING_FAILED",
+                        path=f"geometryRecipe.operations.{definition.id}.pathSegments",
+                        message=sampled_path_payload.exact_geometry_error,
+                    ))
+                if sampled_path_payload.path_points:
+                    arguments["pathPoints"] = sampled_path_payload.path_points
+                    arguments["pathSegmentKinds"] = sampled_path_payload.segment_kinds
+                    arguments["pathSegmentGeometryIds"] = sampled_path_payload.segment_geometry_ids
+                    arguments["pathSegments"] = sampled_path_payload.structured_segments
+                    arguments["pathSampledSegments"] = sampled_path_payload.sampled_segments
+                    arguments["pathSegmentTangents"] = sampled_path_payload.segment_tangents
+                    arguments["pathStationTangents"] = sampled_path_payload.station_tangents
                     arguments["pathPlane"] = getattr(draft.sweepPath, "plane", "XY")
             if definition.operator in {"profile.open_profile_tube_extrude", "sketch.region_extrude", "sketch.centerline_thinwall_extrude", "solid.revolve", "solid.sweep", "solid.loft"} and sketch_case is not None:
+                profile_sketch_id = definition.profileSketchId or next(
+                    (
+                        reference
+                        for reference in definition.sourceRefs
+                        if reference in set(draft.geometryRecipe.sketches)
+                    ),
+                    draft.geometryRecipe.sketches[0]
+                    if len(draft.geometryRecipe.sketches) == 1
+                    else None,
+                )
+                if profile_sketch_id is not None:
+                    arguments["profileSketchId"] = profile_sketch_id
                 arguments["sketch"] = {
+                    "id": profile_sketch_id,
                     "profileMode": draft.sketch.profileMode,
                     "plane": draft.sketch.plane,
                     "primitives": sketch_case["primitives"],
@@ -238,6 +332,49 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
                     "topologySignature": sketch_case["topologySignature"],
                     "thickness": evaluation.values.get("thickness"),
                 }
+            # Carry authored semantic-face declarations with the operation so
+            # exporters can publish every stable source, including faces that
+            # are not currently referenced by a manufacturing rule.
+            supported_locator_operator = definition.operator in {
+                "profile.open_profile_tube_extrude",
+                "sketch.region_extrude",
+            }
+            source_entity_ids = {
+                entity.id for entity in draft.sketch.entities
+            }
+            source_region_ids = {
+                region.id for region in draft.sketch.regions
+            }
+            declared_semantic_faces = [
+                {
+                    "semanticFaceId": face.id,
+                    "sourceOperationId": face.sourceOperationId,
+                    "hostFrame": face.hostFrame,
+                    "locator": (
+                        face.locator.model_dump(mode="json")
+                        if face.locator is not None
+                        else None
+                    ),
+                }
+                for face in draft.geometryRecipe.semanticFaces
+                if (
+                    supported_locator_operator
+                    and face.sourceOperationId == definition.id
+                    and (
+                        face.locator is None
+                        or (
+                            face.locator.kind == "profileEdge"
+                            and face.locator.sourceEntityId in source_entity_ids
+                        )
+                        or (
+                            face.locator.kind == "profileRegion"
+                            and face.locator.sourceEntityId in source_region_ids
+                        )
+                    )
+                )
+            ]
+            if declared_semantic_faces:
+                arguments["semanticFaces"] = declared_semantic_faces
             operations.append(StaticOperation(
                 id=definition.id,
                 operator=definition.operator,
@@ -261,13 +398,21 @@ def lower_to_plan(draft: TemplateDraft, material_snapshot: dict[str, Any]) -> Ca
         "polygonalCutout": "machining.polygonal_through_cutout",
     }
     for feature in evaluation.features:
+        locator = feature.locator.model_dump(mode="json") if feature.locator is not None else None
         operations.append(StaticOperation(
             id=f"cut.{feature.id}",
             operator=rule_operators[feature.featureType],
             arguments={
                 **feature.arguments,
                 "semanticFaceId": feature.semanticFaceId,
+                "locator": locator,
+                "resolvedSourceEntityId": feature.resolvedSourceEntityId,
+                "hostFrame": feature.hostFace,
                 "hostFace": feature.hostFace,
+                "uStart": feature.resolvedUStart,
+                "uSpan": feature.resolvedUSpan,
+                "vStart": feature.resolvedVStart,
+                "vSpan": feature.resolvedVSpan,
                 "polygonVertices": feature.polygonVertices,
             },
             semanticOutputs=[f"feature.{feature.id}.center", f"feature.{feature.id}.wall"],

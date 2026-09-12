@@ -50,6 +50,7 @@ from .services.operations import (  # noqa: E402
     compile_template_draft as compile_template_draft_service,
     complete_template_stage as complete_template_stage_service,
     create_blank_template_draft as create_blank_template_draft_service,
+    create_named_template_draft as create_named_template_draft_service,
     create_material_binding as create_material_binding_service,
     create_template_draft as create_template_draft_service,
     duplicate_template_draft as duplicate_template_draft_service,
@@ -66,13 +67,28 @@ from .services.operations import (  # noqa: E402
     resolve_material_binding as resolve_material_binding_service,
     restore_template_draft as restore_template_draft_service,
     restore_template_revision as restore_template_revision_service,
+    rollback_template_revision as rollback_template_revision_service,
     search_materials as search_materials_service,
     upload_template_attachment as upload_template_attachment_service,
     update_template_attachment as update_template_attachment_service,
     update_template_draft as update_template_draft_service,
     validate_template_stage as validate_template_stage_service,
+    apply_parameter_changes as apply_parameter_changes_service,
+    parameter_contract as parameter_contract_service,
+    preview_parameter_changes as preview_parameter_changes_service,
+    validate_parameter_values as validate_parameter_values_service,
+    apply_material_binding as apply_material_binding_service,
+    preview_material_binding as preview_material_binding_service,
+    apply_sketch_edit as apply_sketch_edit_service,
+    preview_sketch_edit as preview_sketch_edit_service,
+    execute_task as execute_task_service,
+    plan_task as plan_task_service,
     write_source_package as write_source_package_service,
+    get_current_draft as get_current_draft_service,
+    set_current_draft as set_current_draft_service,
 )  # noqa: E402
+from .services.write_context import parse_write_context  # noqa: E402
+from .security import bind_request, release_request, current_owner_id, signed_session  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -82,6 +98,18 @@ class BindingRequest(BaseModel):
 
 class NewDraftRequest(BaseModel):
     name: str = "未命名零部件模板"
+    confirmed: bool = False
+
+
+class NamedDraftResponse(BaseModel):
+    draft: TemplateDraft
+    created: bool
+    idempotent: bool
+
+
+class CurrentDraftRequest(BaseModel):
+    draftId: str = Field(min_length=1)
+    confirmed: bool = False
 
 
 class StageActionResult(BaseModel):
@@ -101,7 +129,13 @@ class ProposalPreviewRequest(BaseModel):
 
 
 class ProposalApplyRequest(ProposalPreviewRequest):
-    pass
+    baseRevision: int | None = Field(default=None, ge=1)
+    confirmed: bool = False
+
+
+class GuardedActionRequest(BaseModel):
+    baseRevision: int | None = Field(default=None, ge=1)
+    confirmed: bool = False
 
 
 class EvaluationRequest(BaseModel):
@@ -118,9 +152,50 @@ class MaterialSearchRequest(BaseModel):
     requirement: MaterialRequirement | None = None
 
 
+class ParameterValuesRequest(BaseModel):
+    values: dict[str, Scalar] = Field(default_factory=dict)
+    units: dict[str, str] = Field(default_factory=dict)
+
+
+class ParameterChangesRequest(BaseModel):
+    baseRevision: int
+    changes: list[dict[str, Any]] = Field(default_factory=list, max_length=200)
+    confirmed: bool = False
+
+
 class SketchSolveRequest(BaseModel):
     draft: TemplateDraft
     overrides: dict[str, float] = Field(default_factory=dict)
+
+
+class SketchEditRequest(BaseModel):
+    baseRevision: int
+    changes: dict[str, Any] = Field(default_factory=dict)
+    confirmed: bool = False
+
+
+class MaterialBindingAssistanceRequest(BaseModel):
+    baseRevision: int
+    sourceRecordId: str
+    mode: Literal["reference", "copy"] = "copy"
+    role: Literal["minimum", "nominal", "maximum", "special"] = "nominal"
+    confirmed: bool = False
+
+
+class TaskPlanRequest(BaseModel):
+    task: Literal["completeCurrentStage", "fixCurrentErrors", "prepareCadCompile", "checkPublishReadiness"]
+
+
+class TaskExecuteRequest(TaskPlanRequest):
+    baseRevision: int
+    confirmed: bool = False
+    input: dict[str, Any] = Field(default_factory=dict)
+
+
+class RollbackRequest(BaseModel):
+    targetRevision: int = Field(ge=1)
+    baseRevision: int = Field(ge=1)
+    confirmed: bool = False
 
 
 material_library = RuiWareMaterialLibrary(MATERIAL_DATABASE)
@@ -140,6 +215,99 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _agent_guard_exempt(path: str) -> bool:
+    if path in {
+        "/api/v1/template-drafts",
+        "/api/v1/template-drafts/blank",
+        "/api/v1/template-drafts/create",
+        "/api/v1/material-bindings",
+        "/api/v1/workspace/current-draft",
+        "/api/v1/materials/search",
+        "/api/v1/sketches/solve",
+        "/api/v1/compile-preview",
+    }:
+        return True
+    return any(marker in path for marker in ("/preview", "/validate", "/evaluate", "/assistant/tasks/plan"))
+
+
+def _draft_id_from_path(path: str) -> str | None:
+    marker = "/api/v1/template-drafts/"
+    if marker not in path:
+        return None
+    candidate = path.split(marker, 1)[1].split("/", 1)[0]
+    return None if candidate in {"blank", "create"} else candidate
+
+
+@app.middleware("http")
+async def write_context_middleware(request: Request, call_next):
+    mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    guarded = mutating and not _agent_guard_exempt(request.url.path)
+    principal = None
+    created_session = False
+    security_token = None
+    try:
+        principal, created_session, security_token = bind_request(request)
+        context = parse_write_context(request, require_write_guard=guarded)
+        draft_id = _draft_id_from_path(request.url.path)
+        if draft_id:
+            repository.ensure_draft_access(
+                draft_id,
+                principal.owner_id,
+                claim_unowned=principal.actor == "gui" and not request.headers.get("Authorization"),
+            )
+        query_draft_id = request.query_params.get("draftId")
+        if query_draft_id:
+            repository.ensure_draft_access(
+                query_draft_id,
+                principal.owner_id,
+                claim_unowned=principal.actor == "gui" and not request.headers.get("Authorization"),
+            )
+    except HTTPException as error:
+        draft_id = _draft_id_from_path(request.url.path)
+        before = repository.get_draft_optional(draft_id) if draft_id else None
+        detail = error.detail if isinstance(error.detail, dict) else {}
+        repository.record_audit(
+            action=f"{request.method} {request.url.path}",
+            actor=principal.actor if principal else "unknown",
+            source=principal.source if principal else "unknown",
+            session_id=principal.session_id if principal else None,
+            draft_id=draft_id,
+            before_revision=before.revision if before else None,
+            after_revision=before.revision if before else None,
+            confirmed=False,
+            status="failed",
+            error_code=detail.get("code"),
+            metadata={"statusCode": error.status_code},
+        )
+        if security_token is not None:
+            release_request(security_token)
+        return await http_exception_handler(request, error)
+    draft_id = _draft_id_from_path(request.url.path)
+    before = repository.get_draft_optional(draft_id) if draft_id else None
+    try:
+        response = await call_next(request)
+    finally:
+        if security_token is not None:
+            release_request(security_token)
+    if created_session:
+        response.set_cookie("ruiware_session", signed_session(principal.session_id), httponly=True, samesite="lax")
+    if mutating and request.url.path != "/api/v1/template-drafts/{draft_id}/rollback" and not request.url.path.endswith("/rollback"):
+        after = repository.get_draft_optional(draft_id) if draft_id else None
+        repository.record_audit(
+            action=f"{request.method} {request.url.path}",
+            actor=context.actor,
+            source=context.source,
+            session_id=context.session_id,
+            draft_id=draft_id,
+            before_revision=before.revision if before else None,
+            after_revision=after.revision if after else None,
+            confirmed=context.confirmed,
+            status="succeeded" if 200 <= response.status_code < 400 else "failed",
+            metadata={"statusCode": response.status_code},
+        )
+    return response
 app.mount("/artifacts", StaticFiles(directory=ARTIFACT_ROOT), name="artifacts")
 app.mount("/uploads", StaticFiles(directory=ATTACHMENT_ROOT), name="uploads")
 
@@ -152,6 +320,26 @@ def template_authoring_registry():
 @app.post("/api/v1/sketches/solve")
 def solve_sketch(request: SketchSolveRequest):
     return solve_semantic_sketch(request.draft, request.overrides)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/sketch/preview")
+def preview_sketch_edit(draft_id: str, request: SketchEditRequest):
+    return preview_sketch_edit_service(repository, draft_id, request.baseRevision, request.changes)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/sketch/apply")
+def apply_sketch_edit(draft_id: str, request: SketchEditRequest):
+    return apply_sketch_edit_service(repository, draft_id, request.baseRevision, request.changes, request.confirmed)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/assistant/tasks/plan")
+def plan_assistant_task(draft_id: str, request: TaskPlanRequest):
+    return plan_task_service(repository, draft_id, request.task)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/assistant/tasks/execute")
+def execute_assistant_task(draft_id: str, request: TaskExecuteRequest):
+    return execute_task_service(repository, draft_id, request.task, request.baseRevision, request.confirmed, request.input)
 
 
 def _now() -> str:
@@ -216,6 +404,16 @@ def create_material_binding(request: BindingRequest):
     return create_material_binding_service(repository, request.sourceRecordId, request.mode)
 
 
+@app.post("/api/v1/template-drafts/{draft_id}/material-binding/preview")
+def preview_material_binding(draft_id: str, request: MaterialBindingAssistanceRequest):
+    return preview_material_binding_service(repository, draft_id, request.baseRevision, request.sourceRecordId, request.mode, request.role)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/material-binding/apply")
+def apply_material_binding(draft_id: str, request: MaterialBindingAssistanceRequest):
+    return apply_material_binding_service(repository, draft_id, request.baseRevision, request.sourceRecordId, request.mode, request.role, request.confirmed)
+
+
 @app.get("/api/v1/material-bindings/{binding_id}/resolved")
 def resolve_material_binding(binding_id: str):
     return resolve_material_binding_service(repository, binding_id)
@@ -226,9 +424,31 @@ def create_blank_template_draft(request: NewDraftRequest):
     return create_blank_template_draft_service(repository, request.name)
 
 
+@app.post("/api/v1/template-drafts/create", response_model=NamedDraftResponse, status_code=201)
+def create_named_template_draft(body: NewDraftRequest, request: Request):
+    context = parse_write_context(request, body.model_dump())
+    if context.actor == "agent" and not context.confirmed:
+        raise api_error("WRITE_CONFIRMATION_REQUIRED", status_code=422)
+    draft, created = create_named_template_draft_service(repository, body.name)
+    return NamedDraftResponse(draft=draft, created=created, idempotent=not created)
+
+
 @app.get("/api/v1/template-drafts", response_model=list[TemplateDraft])
 def list_template_drafts(includeArchived: bool = False):
-    return repository.list_drafts(include_archived=includeArchived)
+    return repository.list_drafts(include_archived=includeArchived, owner_id=current_owner_id())
+
+
+@app.get("/api/v1/workspace/current-draft")
+def get_current_workspace_draft():
+    return get_current_draft_service(repository)
+
+
+@app.put("/api/v1/workspace/current-draft")
+def set_current_workspace_draft(body: CurrentDraftRequest, request: Request):
+    context = parse_write_context(request, body.model_dump())
+    if context.actor == "agent" and not context.confirmed:
+        raise api_error("WRITE_CONFIRMATION_REQUIRED", status_code=422)
+    return set_current_draft_service(repository, body.draftId)
 
 
 @app.post("/api/v1/template-drafts", response_model=TemplateDraft, status_code=201)
@@ -271,14 +491,58 @@ def restore_template_revision(draft_id: str, revision: int):
     return restore_template_revision_service(repository, draft_id, revision)
 
 
+@app.post("/api/v1/template-drafts/{draft_id}/rollback", response_model=TemplateDraft)
+def rollback_template_revision(draft_id: str, body: RollbackRequest, request: Request):
+    context = parse_write_context(
+        request,
+        {"baseRevision": body.baseRevision, "confirmed": body.confirmed},
+        require_write_guard=True,
+    )
+    return rollback_template_revision_service(
+        repository,
+        draft_id,
+        body.targetRevision,
+        body.baseRevision,
+        body.confirmed,
+        context,
+    )
+
+
+@app.get("/api/v1/audit-logs")
+def list_audit_logs(draftId: str | None = None, limit: int = Query(default=100, ge=1, le=500)):
+    return {"items": repository.list_audit(draft_id=draftId, limit=limit)}
+
+
 @app.get("/api/v1/template-drafts/{draft_id}/stages/{stage}/validate", response_model=StageValidation)
 def validate_template_stage(draft_id: str, stage: StageName):
     return validate_template_stage_service(repository, stage, get_template_draft_service(repository, draft_id))
 
 
+@app.get("/api/v1/template-drafts/{draft_id}/parameters")
+def parameter_contract(draft_id: str):
+    return parameter_contract_service(repository, draft_id)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/parameters/validate")
+def validate_parameter_values(draft_id: str, request: ParameterValuesRequest):
+    return validate_parameter_values_service(repository, draft_id, request.values, request.units)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/parameters/preview")
+def preview_parameter_changes(draft_id: str, request: ParameterChangesRequest):
+    return preview_parameter_changes_service(repository, draft_id, request.baseRevision, request.changes)
+
+
+@app.post("/api/v1/template-drafts/{draft_id}/parameters/apply")
+def apply_parameter_changes(draft_id: str, request: ParameterChangesRequest):
+    return apply_parameter_changes_service(repository, draft_id, request.baseRevision, request.changes, request.confirmed)
+
+
 @app.post("/api/v1/template-drafts/{draft_id}/stages/{stage}/complete", response_model=StageActionResult)
-def complete_template_stage(draft_id: str, stage: StageName):
-    draft, validation = complete_template_stage_service(repository, stage, draft_id)
+def complete_template_stage(draft_id: str, stage: StageName, request: Request, body: GuardedActionRequest | None = None):
+    context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    draft, validation = complete_template_stage_service(repository, stage, draft_id, expected_revision)
     return StageActionResult(draft=draft, validation=validation)
 
 
@@ -325,8 +589,10 @@ def download_source_package(draft_id: str):
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/compile", response_model=CompileResult)
-def compile_template_draft(draft_id: str):
-    return compile_template_draft_service(repository, draft_id, ARTIFACT_ROOT)
+def compile_template_draft(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
+    context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    return compile_template_draft_service(repository, draft_id, ARTIFACT_ROOT, expected_revision)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/evaluate", response_model=TemplateEvaluation)
@@ -362,11 +628,15 @@ def preview_proposal(draft_id: str, request: ProposalPreviewRequest):
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/proposals/apply", response_model=TemplateDraft)
-def apply_template_proposal(draft_id: str, request: ProposalApplyRequest):
-    return apply_template_proposal_service(repository, draft_id, request.proposal, request.selectedCommandIds)
+def apply_template_proposal(draft_id: str, body: ProposalApplyRequest, request: Request):
+    context = parse_write_context(request, body.model_dump(), require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    return apply_template_proposal_service(repository, draft_id, body.proposal, body.selectedCommandIds, expected_revision)
 
 
 @app.post("/api/v1/template-drafts/{draft_id}/publish", response_model=PublishResult)
-def publish_template(draft_id: str):
-    released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT)
+def publish_template(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
+    context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
+    expected_revision = context.base_revision if context.actor == "agent" else None
+    released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision)
     return PublishResult(draft=released, version=version, validation=validation)
