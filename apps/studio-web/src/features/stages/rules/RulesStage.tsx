@@ -11,6 +11,7 @@ import {
   addRuleDefaultParameters,
   removeRuleDefaultParameters,
 } from "./ruleDefaultParameters";
+import { getRuleParameterGroups } from "./ruleParameterVisibility";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
 
@@ -48,15 +49,12 @@ export function RulesStage({
   change: (d: Draft) => void;
 }) {
   const semanticFaces = draft.geometryRecipe.semanticFaces;
-  const predeclaredParameters = draft.parameterDefinitions.filter(
-    (parameter) => parameter.declaredInRuleStage,
-  );
-  const existingParameters = draft.parameterDefinitions.filter(
-    (parameter) => !parameter.declaredInRuleStage,
-  );
-  const pendingParameters = predeclaredParameters.filter(
-    (parameter) => !parameter.contractReady,
-  );
+  const {
+    existingParameters,
+    predeclaredParameters,
+    pendingParameters,
+    canCreateParameters,
+  } = getRuleParameterGroups(draft);
   const [ruleParameterError, setRuleParameterError] = useState("");
   const [newRuleParameter, setNewRuleParameter] = useState<NewRuleParameter>(defaultNewRuleParameter);
   const setRules = (featureRules: FeatureRule[]) =>
@@ -371,6 +369,7 @@ export function RulesStage({
         pendingParameters={pendingParameters}
         existingParameters={existingParameters}
         predeclaredParameters={predeclaredParameters}
+        canCreateParameters={canCreateParameters}
         newRuleParameter={newRuleParameter}
         setNewRuleParameter={setNewRuleParameter}
         ruleParameterError={ruleParameterError}
