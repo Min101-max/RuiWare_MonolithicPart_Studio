@@ -44,6 +44,7 @@ import { useGeometryEditFlow } from "./hooks/useGeometryEditFlow";
 import { ParametricSketchCanvas } from "./canvas/ParametricSketchCanvas";
 import {
   OPERATORS,
+  clearDanglingSemanticFaceLocators,
   createEmptySweepPath,
   csv,
   operatorDefaults,
@@ -168,6 +169,7 @@ import {
   sweepArcDegrees as sweepPathArcDegrees,
   validateSweepPathTopology,
 } from "../../sketch/sweepPathTopology";
+import { repairLineArcTangency } from "../../sketch/sketchTangency";
 import type {
   Draft,
   FeatureRule,
@@ -180,6 +182,15 @@ import type {
   SweepPathWindowState,
   TemplateEvaluation,
 } from "../../../types";
+
+const PROFILE_LOCATOR_OPERATORS = new Set([
+  "profile.open_profile_tube_extrude",
+  "sketch.region_extrude",
+]);
+
+const supportsProfileFaceLocator = (operator: string) =>
+  PROFILE_LOCATOR_OPERATORS.has(operator);
+
 export function GeometryStage({
   draft,
   change,
@@ -256,19 +267,47 @@ export function GeometryStage({
   const editOp = (
     i: number,
     patch: Partial<GeometryRecipe["operations"][number]>,
-  ) =>
+  ) => {
+    const previousOperation = recipe.operations[i];
+    const previousId = previousOperation?.id;
+    const nextOperation = previousOperation
+      ? { ...previousOperation, ...patch }
+      : undefined;
+    const nextId = nextOperation?.id;
+    const locatorIsSupported = nextOperation
+      ? supportsProfileFaceLocator(nextOperation.operator)
+      : false;
     setRecipe({
       operations: recipe.operations.map((op, n) =>
         n === i ? { ...op, ...patch } : op,
       ),
+      ...(previousId && nextId
+        ? {
+            semanticFaces: recipe.semanticFaces.map((face) => ({
+              ...face,
+              sourceOperationId:
+                face.sourceOperationId === previousId
+                  ? nextId
+                  : face.sourceOperationId,
+              ...(face.locator?.operationId === previousId
+                ? {
+                    locator: locatorIsSupported
+                      ? { ...face.locator, operationId: nextId }
+                      : null,
+                  }
+                : {}),
+            })),
+          }
+        : {}),
     });
+  };
   const addOp = () =>
     setRecipe({
       operations: [
         ...recipe.operations,
         {
           id: uid("body"),
-          operator: "profile.open_profile_tube_extrude",
+          operator: "sketch.region_extrude",
           sourceRefs: ["sketch.section.main"],
           arguments: {},
           argumentExpressions: {
@@ -288,24 +327,64 @@ export function GeometryStage({
         n === index ? { ...face, ...patch } : face,
       ),
     });
-  const addSemanticFace = () =>
+  const addSemanticFace = () => {
+    const sourceOperation = recipe.operations.find(
+      (operation) =>
+        operation.operator === "profile.open_profile_tube_extrude" ||
+        operation.operator === "sketch.region_extrude",
+    );
+    const sourceEntity = draft.sketch.entities.find(
+      (entity) =>
+        !entity.construction &&
+        entity.geometryType !== "point",
+    );
+    const profileSketchId =
+      sourceOperation?.profileSketchId ||
+      sourceOperation?.sourceRefs.find((ref) => ref.startsWith("sketch.")) ||
+      recipe.sketches[0] ||
+      "sketch.section.main";
     setRecipe({
       semanticFaces: [
         ...recipe.semanticFaces,
-        { id: uid("part.face"), label: "新语义面", hostFrame: "negativeY", sourceOperationId: recipe.operations[0]?.id || "body.main", uStartExpression: "-sectionWidth / 2", uSpanExpression: "sectionWidth", vStartExpression: "0", vSpanExpression: "length" },
+        {
+          id: uid("part.face"),
+          label: "新语义面",
+          hostFrame: "negativeY",
+          sourceOperationId: sourceOperation?.id || recipe.operations[0]?.id || "body.main",
+          locator:
+            sourceOperation && sourceEntity
+              ? {
+                  kind: "profileEdge",
+                  operationId: sourceOperation.id,
+                  profileSketchId,
+                  sourceEntityId: sourceEntity.id,
+                }
+              : null,
+          uStartExpression: "-sectionWidth / 2",
+          uSpanExpression: "sectionWidth",
+          vStartExpression: "0",
+          vSpanExpression: "length",
+        },
       ],
     });
-  const setSketch = (patch: Partial<Draft["sketch"]>) =>
+  };
+  const setSketch = (patch: Partial<Draft["sketch"]>) => {
+    const nextSketch = normalizeSketchNumbers(
+      normalizeSketchTopology({
+        ...draft.sketch,
+        ...patch,
+        constraintsReviewed: false,
+      }),
+    );
     change({
       ...draft,
-      sketch: normalizeSketchNumbers(
-        normalizeSketchTopology({
-          ...draft.sketch,
-          ...patch,
-          constraintsReviewed: false,
-        }),
+      sketch: nextSketch,
+      geometryRecipe: clearDanglingSemanticFaceLocators(
+        draft.geometryRecipe,
+        nextSketch,
       ),
     });
+  };
   const acquisitionLabels = {
     manual: "交互绘制",
     imported: "导入转换",
@@ -351,7 +430,7 @@ export function GeometryStage({
             ? operation
             : {
                 ...operation,
-                operator: "profile.open_profile_tube_extrude",
+                operator: "sketch.region_extrude",
                 argumentExpressions: {
                   ...operation.argumentExpressions,
                   length:
@@ -359,6 +438,12 @@ export function GeometryStage({
                 },
               },
         ),
+        semanticFaces: reset
+          ? draft.geometryRecipe.semanticFaces.map((face) => ({
+              ...face,
+              locator: null,
+            }))
+          : draft.geometryRecipe.semanticFaces,
         reviewed: false,
       },
     });
@@ -404,6 +489,18 @@ export function GeometryStage({
           ),
         })),
         constraintsReviewed: false,
+      },
+      geometryRecipe: {
+        ...draft.geometryRecipe,
+        semanticFaces: draft.geometryRecipe.semanticFaces.map((face) =>
+          face.locator?.kind === "profileEdge" &&
+          face.locator.sourceEntityId === oldId
+            ? {
+                ...face,
+                locator: { ...face.locator, sourceEntityId: nextId },
+              }
+            : face,
+        ),
       },
     });
     setSelectedEntities((items) =>
@@ -677,6 +774,7 @@ function SweepPathDialog({
   showError: (error: unknown) => void;
 }) {
   const [workingPath, setWorkingPath] = useState<SweepPathSketch>(() => structuredClone(path));
+  const [repairNote, setRepairNote] = useState<string | null>(null);
   const [moveMode, setMoveMode] = useState(false);
   const initialPathRef = useRef(structuredClone(path));
   const editorDraft = useMemo(() => ({ ...draft, sketch: pathToSketch(workingPath) }), [draft, workingPath]);
@@ -693,6 +791,34 @@ function SweepPathDialog({
     if (dirty && !window.confirm("扫掠路径存在未确认修改，取消后将恢复打开窗口前的路径。确定取消吗？")) return;
     onCancel();
   }, [dirty, onCancel]);
+  const repairTangency = () => {
+    const result = repairLineArcTangency(
+      workingPath.geometry as Draft["sketch"]["entities"],
+      workingPath.constraints as Draft["sketch"]["constraints"],
+      {
+        endpointToleranceMm: 0.05,
+        maxAngleDegrees: 8,
+        fullyConstrainedEntityIds: flow.solution?.fullyConstrained
+          ? editorDraft.sketch.entities.map((entity) => entity.id)
+          : undefined,
+      },
+    );
+    if (!result.repaired) {
+      setRepairNote(
+        result.diagnostics.length
+          ? result.diagnostics.map((item) => item.message).join("；")
+          : "未发现可自动修复的 line-arc/arc-line 连接。",
+      );
+      return;
+    }
+    flow.beginSketchEdit();
+    flow.applySketch({
+      ...editorDraft.sketch,
+      entities: result.entities,
+      constraintsReviewed: false,
+    });
+    setRepairNote(`已修复 ${result.repairs.length} 处相切连接；可使用撤销/重做恢复。`);
+  };
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -789,8 +915,9 @@ function SweepPathDialog({
           cursorPoint={flow.cursorPoint}
           selectedEntity={flow.selectedEntity || "未选择"}
         />
-        <div className="sweep-path-status-row"><span className={hasErrors ? "status-bad" : "status-good"}>{hasErrors ? <CircleAlert size={14} /> : <Check size={14} />} {pathStatus}</span><span>{workingPath.geometry.length} 个路径图元 · {workingPath.constraints.length} 条约束{dirty ? " · 有未确认修改" : ""}</span></div>
+        <div className="sweep-path-status-row"><span className={hasErrors ? "status-bad" : "status-good"}>{hasErrors ? <CircleAlert size={14} /> : <Check size={14} />} {pathStatus}</span><span>{workingPath.geometry.length} 个路径图元 · {workingPath.constraints.length} 条约束{dirty ? " · 有未确认修改" : ""}</span><button className="secondary-btn" onClick={repairTangency} disabled={!workingPath.geometry.some((item) => item.geometryType === "line") || !workingPath.geometry.some((item) => item.geometryType === "arc")}>修复为相切</button></div>
         {diagnostics.length > 0 && <div className="sweep-path-diagnostics">{diagnostics.map((item) => <div key={`${item.code}-${item.path}`}><strong>{item.severity === "error" ? "错误" : "提示"}</strong><code>{item.code}</code><span>{item.message}</span></div>)}</div>}
+        {repairNote ? <div className="sweep-path-repair-note">{repairNote}</div> : null}
         <div className="sweep-path-start-hint"><span className="sweep-path-start-dot" /> 起点：{topology.startEndpointRef ? `${topology.startEndpointRef.geometryId}（${topology.startEndpointRef.endpoint === "start" ? "起点" : "终点"}）` : "未定义"} · 第一段方向 →（按连接图推导）</div>
         <div className="sweep-path-start-picks">{workingPath.geometry.filter((item) => item.geometryType === "line" || item.geometryType === "arc").map((item) => <span key={item.id}><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "start" }, startPointId: item.id }))}>{item.id} 起点</button><button className="text-btn" onClick={() => setWorkingPath((current) => ({ ...current, startEndpointRef: { geometryId: item.id, endpoint: "end" }, startPointId: item.id }))}>{item.id} 终点</button></span>)}</div>
         <footer className="sweep-path-dialog-actions"><button className="secondary-btn" onClick={cancel}>取消</button><button className="secondary-btn" onClick={cancel}>关闭</button><button className="primary-btn" disabled={hasErrors || !workingPath.geometry.length} onClick={confirm}><Check size={15} />确认路径</button></footer>

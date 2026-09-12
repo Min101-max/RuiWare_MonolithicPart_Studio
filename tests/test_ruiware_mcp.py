@@ -2,8 +2,12 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "ruiware-mcp"))
 
+from ruiware_mcp.api_client import RuiWareApiError
+from ruiware_mcp.core.contracts import TOOL_CONTRACTS
 from ruiware_mcp.server import McpApplication, TOOLS
 
 
@@ -26,12 +30,43 @@ def content(result):
     return json.loads(result["content"][0]["text"])
 
 
+def test_existing_tool_contract_is_preserved():
+    current_tools = {tool["name"]: tool for tool in TOOLS}
+    assert set(current_tools) == set(TOOL_CONTRACTS)
+    for name, contract in TOOL_CONTRACTS.items():
+        assert tuple(current_tools[name]["inputSchema"].get("required", ())) == contract["required"]
+
+
 def test_tools_list_and_initialize_are_mcp_compatible():
     app = McpApplication(FakeClient())
     initialized = app.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
     assert initialized["result"]["capabilities"] == {"tools": {}}
     listed = app.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     assert {tool["name"] for tool in listed["result"]["tools"]} == {tool["name"] for tool in TOOLS}
+
+
+def test_parameter_assistance_tools_use_preview_then_confirmed_apply():
+    app = McpApplication(FakeClient())
+    app.call_tool("ruiware_get_parameter_contract", {"draftId": "draft-1"})
+    assert app.client.calls[-1] == ("GET", "/template-drafts/draft-1/parameters", None)
+    app.call_tool("ruiware_preview_parameter_changes", {
+        "draftId": "draft-1", "baseRevision": 3, "changes": [{"parameterId": "length", "value": 1200}],
+    })
+    assert app.client.calls[-1][0:2] == ("POST", "/template-drafts/draft-1/parameters/preview")
+    app.call_tool("ruiware_apply_parameter_changes", {
+        "draftId": "draft-1", "baseRevision": 3, "changes": [], "confirmed": True,
+    })
+    assert app.client.calls[-1][0:2] == ("POST", "/template-drafts/draft-1/parameters/apply")
+    assert app.client.calls[-1][2]["confirmed"] is True
+
+
+def test_business_task_tools_use_plan_then_confirmed_execute():
+    app = McpApplication(FakeClient())
+    app.call_tool("ruiware_plan_task", {"draftId": "draft-1", "task": "fixCurrentErrors"})
+    assert app.client.calls[-1] == ("POST", "/template-drafts/draft-1/assistant/tasks/plan", {"task": "fixCurrentErrors"})
+    task_input = {"kind": "parameterChanges", "changes": [{"parameterId": "length", "value": 1200}]}
+    app.call_tool("ruiware_execute_task", {"draftId": "draft-1", "task": "fixCurrentErrors", "baseRevision": 3, "confirmed": True, "input": task_input})
+    assert app.client.calls[-1] == ("POST", "/template-drafts/draft-1/assistant/tasks/execute", {"task": "fixCurrentErrors", "baseRevision": 3, "confirmed": True, "input": task_input})
 
 
 def test_context_attachment_and_validation_tools_are_read_only():
@@ -50,6 +85,119 @@ def test_submit_proposal_uses_only_the_explicit_apply_route():
     client = FakeClient()
     app = McpApplication(client)
     proposal = {"id": "proposal-1", "baseRevision": 3, "commands": []}
-    response = content(app.call_tool("ruiware_submit_proposal", {"draftId": "draft-1", "proposal": proposal, "selectedCommandIds": []}))
+    response = content(app.call_tool("ruiware_submit_proposal", {
+        "draftId": "draft-1",
+        "proposal": proposal,
+        "selectedCommandIds": [],
+        "baseRevision": 3,
+        "confirmed": True,
+    }))
     assert response["path"] == "/template-drafts/draft-1/proposals/apply"
     assert response["payload"]["proposal"] == proposal
+    assert response["payload"]["baseRevision"] == 3
+    assert response["payload"]["confirmed"] is True
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments"),
+    [
+        ("ruiware_submit_proposal", {"draftId": "draft-1", "proposal": {"baseRevision": 3}}),
+        ("ruiware_compile_draft", {"draftId": "draft-1"}),
+        ("ruiware_complete_stage", {"draftId": "draft-1", "stage": "baseSketch"}),
+        ("ruiware_publish_template", {"draftId": "draft-1"}),
+        ("create_template", {"name": "未确认模板"}),
+    ],
+)
+def test_mcp_write_tools_require_explicit_guard_arguments(tool, arguments):
+    with pytest.raises(ValueError):
+        McpApplication(FakeClient()).call_tool(tool, arguments)
+
+
+def test_guarded_workflow_tools_forward_revision_and_confirmation():
+    client = FakeClient()
+    app = McpApplication(client)
+
+    app.call_tool("ruiware_compile_draft", {"draftId": "draft-1", "baseRevision": 3, "confirmed": True})
+    app.call_tool("ruiware_complete_stage", {"draftId": "draft-1", "stage": "baseSketch", "baseRevision": 3, "confirmed": True})
+    app.call_tool("ruiware_publish_template", {"draftId": "draft-1", "baseRevision": 3, "confirmed": True})
+
+    assert client.calls == [
+        ("POST", "/template-drafts/draft-1/compile", {"baseRevision": 3, "confirmed": True}),
+        ("POST", "/template-drafts/draft-1/stages/baseSketch/complete", {"baseRevision": 3, "confirmed": True}),
+        ("POST", "/template-drafts/draft-1/publish", {"baseRevision": 3, "confirmed": True}),
+    ]
+
+
+def test_api_errors_are_returned_to_agents_as_structured_payloads():
+    class ErrorClient(FakeClient):
+        def get(self, path):
+            raise RuiWareApiError(
+                "草稿已被其他操作更新。",
+                status=409,
+                payload={
+                    "code": "DRAFT_REVISION_CONFLICT",
+                    "message": "草稿已被其他操作更新。",
+                    "action": "请重新读取草稿后再提交。",
+                    "fields": [],
+                    "traceId": "trace-1",
+                    "retryable": True,
+                },
+            )
+
+    response = McpApplication(ErrorClient()).handle({
+        "jsonrpc": "2.0",
+        "id": 3,
+        "method": "tools/call",
+        "params": {"name": "ruiware_get_draft_context", "arguments": {"draftId": "draft-1"}},
+    })
+    result = response["result"]
+    payload = json.loads(result["content"][0]["text"])
+    assert result["isError"] is True
+    assert payload["status"] == 409
+    assert payload["error"]["code"] == "DRAFT_REVISION_CONFLICT"
+    assert payload["error"]["retryable"] is True
+
+
+def test_authoring_and_workflow_tools_keep_api_routes_explicit():
+    client = FakeClient()
+    app = McpApplication(client)
+    app.call_tool("ruiware_solve_sketch", {"draft": {"id": "draft-1"}})
+    app.call_tool("ruiware_preview_proposal", {"draftId": "draft-1", "proposal": {"id": "p-1"}})
+    app.call_tool("ruiware_submit_proposal", {"draftId": "draft-1", "proposal": {"id": "p-1"}, "baseRevision": 3, "confirmed": True})
+    app.call_tool("ruiware_compile_draft", {"draftId": "draft-1", "baseRevision": 3, "confirmed": True})
+    app.call_tool("ruiware_get_latest_compile", {"draftId": "draft-1"})
+    app.call_tool("ruiware_evaluate_draft", {"draftId": "draft-1"})
+    app.call_tool("ruiware_complete_stage", {"draftId": "draft-1", "stage": "baseSketch", "baseRevision": 3, "confirmed": True})
+    assert client.calls == [
+        ("POST", "/sketches/solve", {"draft": {"id": "draft-1"}, "overrides": {}}),
+        ("POST", "/template-drafts/draft-1/proposals/preview", {"proposal": {"id": "p-1"}, "selectedCommandIds": None}),
+        ("POST", "/template-drafts/draft-1/proposals/apply", {"proposal": {"id": "p-1"}, "selectedCommandIds": None, "baseRevision": 3, "confirmed": True}),
+        ("POST", "/template-drafts/draft-1/compile", {"baseRevision": 3, "confirmed": True}),
+        ("GET", "/template-drafts/draft-1/compile-runs/latest", None),
+        ("POST", "/template-drafts/draft-1/evaluate", {"overrides": {}, "material": {}, "product": {}, "component": {}, "projectZone": {}}),
+        ("POST", "/template-drafts/draft-1/stages/baseSketch/complete", {"baseRevision": 3, "confirmed": True}),
+    ]
+
+
+def test_guidance_tools_return_agent_facing_information():
+    class GuidanceClient(FakeClient):
+        def get(self, path):
+            self.calls.append(("GET", path, None))
+            if path.endswith("/draft-1"):
+                return {
+                    "id": "draft-1",
+                    "stageStatus": {"templateInfo": "in_progress"},
+                    "parameterDefinitions": [{"id": "length", "label": "长度", "default": 100}],
+                    "variants": [{"id": "nominal", "overrides": {"length": 120}}],
+                }
+            return {"stage": "templateInfo", "complete": False, "checks": [{"passed": False, "path": "name"}]}
+
+    app = McpApplication(GuidanceClient())
+    parameter = content(app.call_tool("ruiware_get_parameter_help", {"draftId": "draft-1", "parameterId": "length"}))
+    guidance = content(app.call_tool("ruiware_get_next_actions", {"draftId": "draft-1"}))
+    explained = content(app.call_tool("ruiware_explain_error", {"error": {"code": "REQUEST_INVALID", "retryable": True}}))
+    assert parameter["variantOverride"] == 120
+    assert guidance["currentStage"] == "templateInfo"
+    assert guidance["blockingChecks"]
+    assert explained["code"] == "REQUEST_INVALID"
+    assert explained["retryable"] is True

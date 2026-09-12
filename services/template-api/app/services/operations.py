@@ -6,6 +6,7 @@ from .draft import (
     archive_template_draft,
     complete_template_stage,
     create_blank_template_draft,
+    create_named_template_draft,
     create_template_draft,
     duplicate_template_draft,
     remove_template_attachment,
@@ -13,12 +14,18 @@ from .draft import (
     list_template_revisions,
     restore_template_draft,
     restore_template_revision,
+    rollback_template_revision,
     upload_template_attachment,
     update_template_draft,
     update_template_attachment,
     validate_template_stage,
 )
 from .material import create_material_binding, material_sources, resolve_material_binding, search_materials
+from .material_assistance import apply_material_binding, preview_material_binding
+from .parameters import apply_parameter_changes, parameter_contract, preview_parameter_changes, validate_parameter_values
+from .sketch import apply_sketch_edit, preview_sketch_edit
+from .orchestration import execute_task, plan_task
+from .workspace import get_current_draft, set_current_draft
 from .workflow import (
     compile_preview,
     compile_template_draft,

@@ -10,14 +10,27 @@ from template_core.sketch_solver import solve_semantic_sketch
 
 from ..errors import api_error
 from ..repository import DuplicateCodeError, Repository
-from ._common import ALLOWED_ATTACHMENT_EXTENSIONS, AttachmentUpdateRequestBody, attachment_target_path, draft_or_404, next_template_code, now, save_draft
+from ._common import ALLOWED_ATTACHMENT_EXTENSIONS, AttachmentUpdateRequestBody, attachment_target_path, draft_or_404, ensure_draft_revision, next_template_code, now, save_draft
 from .proposal import sync_sketch_seed_coordinates
 from .context import validate_stage_with_context
+from .write_context import WriteContext
+from ..security import current_owner_id
 
 
 def create_blank_template_draft(repository: Repository, name: str) -> TemplateDraft:
     draft = TemplateDraft(code=next_template_code(repository), name=name.strip() or "未命名零部件模板")
-    return repository.save_draft(draft, reason="create")
+    saved = repository.save_draft(draft, reason="create")
+    repository.claim_draft(saved.id, current_owner_id())
+    return saved
+
+
+def create_named_template_draft(repository: Repository, name: str) -> tuple[TemplateDraft, bool]:
+    """Create a blank draft by name, reusing an active draft for idempotency."""
+    normalized_name = name.strip() or "未命名零部件模板"
+    for existing in repository.list_drafts(owner_id=current_owner_id()):
+        if existing.name == normalized_name:
+            return existing, False
+    return create_blank_template_draft(repository, normalized_name), True
 
 
 def create_template_draft(repository: Repository, draft: TemplateDraft) -> TemplateDraft:
@@ -42,7 +55,9 @@ def update_template_draft(repository: Repository, draft_id: str, draft: Template
 
 def duplicate_template_draft(repository: Repository, draft_id: str) -> TemplateDraft:
     try:
-        return repository.duplicate_draft(draft_id)
+        duplicated = repository.duplicate_draft(draft_id)
+        repository.claim_draft(duplicated.id, current_owner_id())
+        return duplicated
     except KeyError as error:
         raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
 
@@ -77,17 +92,64 @@ def restore_template_revision(repository: Repository, draft_id: str, revision: i
         raise api_error("DRAFT_REVISION_NOT_FOUND", status_code=404, context={"draftId": draft_id, "revision": revision}) from error
 
 
+def rollback_template_revision(
+    repository: Repository,
+    draft_id: str,
+    target_revision: int,
+    base_revision: int,
+    confirmed: bool,
+    context: WriteContext,
+) -> TemplateDraft:
+    draft = draft_or_404(repository, draft_id)
+    if context.actor == "agent" and not confirmed:
+        raise api_error("WRITE_CONFIRMATION_REQUIRED", status_code=422)
+    if draft.revision != base_revision:
+        raise api_error(
+            "DRAFT_REVISION_CONFLICT",
+            status_code=409,
+            context={"draftId": draft_id, "expectedRevision": base_revision, "currentRevision": draft.revision},
+        )
+    try:
+        restored = repository.restore_revision(draft_id, target_revision)
+    except KeyError as error:
+        raise api_error("DRAFT_REVISION_NOT_FOUND", status_code=404, context={"draftId": draft_id, "revision": target_revision}) from error
+    repository.record_audit(
+        action="rollback",
+        actor=context.actor,
+        source=context.source,
+        session_id=context.session_id,
+        draft_id=draft_id,
+        before_revision=draft.revision,
+        after_revision=restored.revision,
+        confirmed=confirmed,
+        status="succeeded",
+        metadata={"targetRevision": target_revision},
+    )
+    return restored
+
+
 def validate_template_stage(repository: Repository, stage: StageName, draft: TemplateDraft) -> StageValidation:
     return validate_stage_with_context(repository, stage, draft)
 
 
-def complete_template_stage(repository: Repository, stage: StageName, draft_id: str) -> tuple[TemplateDraft, StageValidation]:
+def complete_template_stage(
+    repository: Repository,
+    stage: StageName,
+    draft_id: str,
+    expected_revision: int | None = None,
+) -> tuple[TemplateDraft, StageValidation]:
     draft = draft_or_404(repository, draft_id)
+    ensure_draft_revision(draft, expected_revision)
     validation = validate_template_stage(repository, stage, draft)
     if not validation.complete:
         return draft, validation
     stage_status = draft.stageStatus.model_copy(update={stage: "complete"})
-    completed = save_draft(repository, draft.model_copy(update={"stageStatus": stage_status}), reason=f"complete-{stage}")
+    completed = save_draft(
+        repository,
+        draft.model_copy(update={"stageStatus": stage_status}),
+        reason=f"complete-{stage}",
+        expected_revision=expected_revision,
+    )
     return completed, validation
 
 

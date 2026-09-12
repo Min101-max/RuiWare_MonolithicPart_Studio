@@ -13,6 +13,7 @@ from .metamodel import (
     ParameterDefinition,
     ParameterSource,
     PartInterface,
+    SemanticFaceLocator,
     VariantDefinition,
 )
 from .material import effective_thickness_domain
@@ -256,18 +257,19 @@ def default_geometry_recipe() -> GeometryRecipe:
     return GeometryRecipe(
         constructionMode="extrude",
         semanticFaces=[
-            {"id": "part.face.front", "label": "前侧面", "hostFrame": "negativeY", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.face.back", "label": "后侧面", "hostFrame": "positiveY", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.face.left", "label": "左侧面", "hostFrame": "negativeX", "uStartExpression": "-sectionHeight / 2", "uSpanExpression": "sectionHeight", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.face.right", "label": "右侧面", "hostFrame": "positiveX", "uStartExpression": "-sectionHeight / 2", "uSpanExpression": "sectionHeight", "vStartExpression": "0", "vSpanExpression": "length"},
-            {"id": "part.endFace.start", "label": "起始端面", "hostFrame": "negativeZ", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "-sectionHeight / 2", "vSpanExpression": "sectionHeight"},
-            {"id": "part.endFace.end", "label": "终止端面", "hostFrame": "positiveZ", "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "-sectionHeight / 2", "vSpanExpression": "sectionHeight"},
+            {"id": "part.face.front", "label": "前侧面", "hostFrame": "negativeY", "locator": {"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.bottom"}, "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.face.back", "label": "后侧面", "hostFrame": "positiveY", "locator": {"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.top"}, "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.face.left", "label": "左侧面", "hostFrame": "negativeX", "locator": {"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.left"}, "uStartExpression": "-sectionHeight / 2", "uSpanExpression": "sectionHeight", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.face.right", "label": "右侧面", "hostFrame": "positiveX", "locator": {"kind": "profileEdge", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "edge.right"}, "uStartExpression": "-sectionHeight / 2", "uSpanExpression": "sectionHeight", "vStartExpression": "0", "vSpanExpression": "length"},
+            {"id": "part.endFace.start", "label": "起始端面", "hostFrame": "negativeZ", "locator": {"kind": "profileRegion", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "section.region.main", "capSide": "start"}, "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "-sectionHeight / 2", "vSpanExpression": "sectionHeight"},
+            {"id": "part.endFace.end", "label": "终止端面", "hostFrame": "positiveZ", "locator": {"kind": "profileRegion", "operationId": "body.main", "profileSketchId": "sketch.section.main", "sourceEntityId": "section.region.main", "capSide": "end"}, "uStartExpression": "-sectionWidth / 2", "uSpanExpression": "sectionWidth", "vStartExpression": "-sectionHeight / 2", "vSpanExpression": "sectionHeight"},
         ],
         operations=[
             {
                 "id": "body.main",
                 "operator": "profile.open_profile_tube_extrude",
                 "sourceRefs": ["sketch.section.main"],
+                "profileSketchId": "sketch.section.main",
                 "argumentExpressions": {
                     "length": "length",
                 },
@@ -316,6 +318,15 @@ class TemplateDraft(BaseModel):
 
     @model_validator(mode="after")
     def normalize_metadata(self) -> "TemplateDraft":
+        # A legacy payload may omit semanticFaces entirely.  The nested
+        # GeometryRecipe default is intentionally richer for new authored
+        # templates, but must not silently add source locators to an older
+        # draft (especially one whose operation is not an extrusion).
+        if "semanticFaces" not in self.geometryRecipe.model_fields_set:
+            self.geometryRecipe.semanticFaces = [
+                face.model_copy(update={"locator": None})
+                for face in self.geometryRecipe.semanticFaces
+            ]
         self.code = self.code.strip().upper()
         self.tags = list(dict.fromkeys(tag.strip() for tag in self.tags if tag.strip()))
         if self.materialRequirements:
