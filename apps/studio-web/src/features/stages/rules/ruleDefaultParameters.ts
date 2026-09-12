@@ -139,12 +139,7 @@ const parameterDefaults: Record<FeatureRule["featureType"], RuleDefaultParameter
   polygonalCutout: [],
 };
 
-const parameterIdFor = (ruleId: string, suffix: string) => {
-  const normalized = ruleId.replace(/[^A-Za-z0-9_]/g, "_");
-  return `${/^[A-Za-z]/.test(normalized) ? normalized : `feature_${normalized}`}_${suffix}`;
-};
-
-const nextAvailableId = (
+export const nextAvailableParameterId = (
   parameterDefinitions: ParameterDefinition[],
   preferredId: string,
 ) => {
@@ -203,7 +198,7 @@ export const addRuleDefaultParameters = (
     );
     const parameterId =
       existing?.id ??
-      nextAvailableId(nextParameters, parameterIdFor(rule.id, definition.suffix));
+      nextAvailableParameterId(nextParameters, definition.suffix);
     if (!existing)
       nextParameters = [
         ...nextParameters,

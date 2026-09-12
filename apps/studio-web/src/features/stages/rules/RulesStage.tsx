@@ -9,6 +9,7 @@ import {
 } from "./RuleParameterPanel";
 import {
   addRuleDefaultParameters,
+  nextAvailableParameterId,
   removeRuleDefaultParameters,
 } from "./ruleDefaultParameters";
 import { getRuleParameterGroups } from "./ruleParameterVisibility";
@@ -275,15 +276,8 @@ export function RulesStage({
         n === dimensionIndex ? { ...dimension, ...patch } : dimension,
       ),
     });
-  const uniqueParameterId = (rule: FeatureRule, suffix: string) => {
-    const stem = `${rule.id.replace(/[^A-Za-z0-9_]/g, "_")}_${suffix}`.replace(/^[^A-Za-z]+/, "feature_");
-    let candidate = stem;
-    let sequence = 2;
-    while (draft.parameterDefinitions.some((parameter) => parameter.id === candidate)) candidate = `${stem}_${sequence++}`;
-    return candidate;
-  };
-  const addInstanceParameter = (ruleIndex: number, rule: FeatureRule, suffix: string, label: string, apply: (id: string) => Partial<FeatureRule>) => {
-    const id = uniqueParameterId(rule, suffix);
+  const addInstanceParameter = (ruleIndex: number, suffix: string, label: string, apply: (id: string) => Partial<FeatureRule>) => {
+    const id = nextAvailableParameterId(draft.parameterDefinitions, suffix);
     const parameter = createRuleParameter({
       id,
       label,
@@ -306,16 +300,14 @@ export function RulesStage({
       : kind === "trapezoid"
         ? [["bottomWidth", "底边宽度", 50], ["topWidth", "顶边宽度", 30], ["cutoutHeight", "切口高度", 30]]
         : [["cutoutWidth", "切口宽度", 48], ["cutoutHeight", "切口高度", 32], ["notchWidth", "缺口宽度", 20], ["notchHeight", "缺口高度", 14]];
-    const usedIds = new Set(draft.parameterDefinitions.map((parameter) => parameter.id));
     const newParameters: ParameterDefinition[] = [];
     const profileDimensions = [...rule.profileDimensions];
     for (const [id, label, defaultValue] of dimensions) {
       if (profileDimensions.some((dimension) => dimension.id === id)) continue;
-      const stem = `${rule.id.replace(/[^A-Za-z0-9_]/g, "_")}_${id}`;
-      let parameterId = stem;
-      let suffix = 2;
-      while (usedIds.has(parameterId)) parameterId = `${stem}_${suffix++}`;
-      usedIds.add(parameterId);
+      const parameterId = nextAvailableParameterId(
+        [...draft.parameterDefinitions, ...newParameters],
+        id,
+      );
       newParameters.push(createRuleParameter({
         id: parameterId,
         label,
@@ -500,7 +492,7 @@ export function RulesStage({
                     <div className="placement-value-row">
                       {rule.placement.mode === "linearArray" && <Field label="首项距起始端" hint="从所选语义面的局部 U/V 起始边界量取。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>}
                       <Field label={rule.placement.mode === "symmetric" ? "相邻间距表达式" : "间距表达式"} hint="填参数 ID（如 holePitch）即可在实例化时输入；也可在参数页把该参数设为公式派生。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.pitchExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, pitchExpression: e.target.value } })} /></code></Field>
-                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, rule, "pitch", `${rule.name}间距`, (id) => ({ placement: { ...rule.placement, pitchExpression: id } }))}><Plus size={13} />创建可填写间距参数</button>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "pitch", `${rule.name}间距`, (id) => ({ placement: { ...rule.placement, pitchExpression: id } }))}><Plus size={13} />创建可填写间距参数</button>
                     </div>
                   ) : rule.placement.mode === "equalSpan" ? (
                     <div className="form-grid two placement-margins">
@@ -531,7 +523,7 @@ export function RulesStage({
                     ))}
                     <div className="contour-actions">
                       <button className="text-btn" onClick={() => edit(i, { profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "新尺寸", parameterId: draft.parameterDefinitions.find((parameter) => parameter.valueType === "number" || parameter.valueType === "integer")?.id || "length" }] })}><Plus size={13} />绑定已有参数</button>
-                      <button className="text-btn" onClick={() => addInstanceParameter(i, rule, "cutoutSize", `${rule.name}尺寸`, (id) => ({ profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "切口尺寸", parameterId: id }] }))}><Plus size={13} />创建可填写尺寸参数</button>
+                      <button className="text-btn" onClick={() => addInstanceParameter(i, "cutoutSize", `${rule.name}尺寸`, (id) => ({ profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "切口尺寸", parameterId: id }] }))}><Plus size={13} />创建可填写尺寸参数</button>
                     </div>
                  </div>
                 )}

@@ -38,14 +38,14 @@ describe("rule parameter visibility", () => {
         [{ id: "rule-1" } as Draft["featureRules"][number]],
         [
           parameter({ id: "length", label: "长度", default: 2400 }),
-          parameter({ id: "rule-1_holeDiameter", label: "孔径", default: 12, ruleDefaultFor: "ruleDefault:rule-1:holeDiameter" }),
+          parameter({ id: "holeDiameter", label: "孔径", default: 12, ruleDefaultFor: "ruleDefault:rule-1:holeDiameter" }),
           parameter({ id: "customPitch", label: "孔距", default: 100, declaredInRuleStage: true, contractReady: false }),
         ],
       ),
     );
 
     expect(groups.existingParameters.map((parameter) => parameter.id)).toEqual([
-      "rule-1_holeDiameter",
+      "holeDiameter",
     ]);
     expect(groups.predeclaredParameters.map((parameter) => parameter.id)).toEqual([
       "customPitch",

@@ -39,17 +39,17 @@ describe("rule default parameters", () => {
     );
 
     expect(first.parameterDefinitions.map((parameter) => parameter.id)).toEqual([
-      "upright_mainHole_holeDiameter",
-      "upright_mainHole_holePitch",
+      "holeDiameter",
+      "holePitch",
     ]);
     expect(second.parameterDefinitions.map((parameter) => parameter.id)).toEqual([
-      "upright_mainHole_holeDiameter",
-      "upright_mainHole_holePitch",
-      "upright_serviceHole_holeDiameter",
-      "upright_serviceHole_holePitch",
+      "holeDiameter",
+      "holePitch",
+      "holeDiameter_2",
+      "holePitch_2",
     ]);
-    expect(first.rule.argumentExpressions.diameter).toBe("upright_mainHole_holeDiameter");
-    expect(second.rule.placement.pitchExpression).toBe("upright_serviceHole_holePitch");
+    expect(first.rule.argumentExpressions.diameter).toBe("holeDiameter");
+    expect(second.rule.placement.pitchExpression).toBe("holePitch_2");
     expect(first.parameterDefinitions[0].ruleDefaultFor).toBe(
       "ruleDefault:upright_mainHole:holeDiameter",
     );
@@ -68,8 +68,8 @@ describe("rule default parameters", () => {
     );
 
     expect(remaining.map((parameter) => parameter.id)).toEqual([
-      "upright_serviceHole_holeDiameter",
-      "upright_serviceHole_holePitch",
+      "holeDiameter_2",
+      "holePitch_2",
     ]);
   });
 
@@ -78,13 +78,13 @@ describe("rule default parameters", () => {
     const result = addRuleDefaultParameters(slotRule, [] as ParameterDefinition[]);
 
     expect(result.parameterDefinitions.map((parameter) => parameter.id)).toEqual([
-      "upright_slot_slotWidth",
-      "upright_slot_slotLength",
-      "upright_slot_slotPitch",
+      "slotWidth",
+      "slotLength",
+      "slotPitch",
     ]);
-    expect(result.rule.argumentExpressions.width).toBe("upright_slot_slotWidth");
-    expect(result.rule.argumentExpressions.length).toBe("upright_slot_slotLength");
-    expect(result.rule.placement.pitchExpression).toBe("upright_slot_slotPitch");
+    expect(result.rule.argumentExpressions.width).toBe("slotWidth");
+    expect(result.rule.argumentExpressions.length).toBe("slotLength");
+    expect(result.rule.placement.pitchExpression).toBe("slotPitch");
   });
 
   it("generates rectangular-cutout parameters from the selected feature type", () => {
@@ -92,10 +92,24 @@ describe("rule default parameters", () => {
     const result = addRuleDefaultParameters(cutoutRule, [] as ParameterDefinition[]);
 
     expect(result.parameterDefinitions.map((parameter) => parameter.id)).toEqual([
-      "upright_cutout_cutoutWidth",
-      "upright_cutout_cutoutHeight",
+      "cutoutWidth",
+      "cutoutHeight",
     ]);
-    expect(result.rule.argumentExpressions.width).toBe("upright_cutout_cutoutWidth");
-    expect(result.rule.argumentExpressions.height).toBe("upright_cutout_cutoutHeight");
+    expect(result.rule.argumentExpressions.width).toBe("cutoutWidth");
+    expect(result.rule.argumentExpressions.height).toBe("cutoutHeight");
+  });
+
+  it("adds a numeric suffix when a simplified ID is already used", () => {
+    const result = addRuleDefaultParameters(
+      holeRule("another-hole"),
+      [{ id: "holeDiameter" } as ParameterDefinition],
+    );
+
+    expect(result.parameterDefinitions.map((parameter) => parameter.id)).toEqual([
+      "holeDiameter",
+      "holeDiameter_2",
+      "holePitch",
+    ]);
+    expect(result.rule.argumentExpressions.diameter).toBe("holeDiameter_2");
   });
 });
