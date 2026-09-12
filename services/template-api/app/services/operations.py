@@ -25,7 +25,7 @@ from .material_assistance import apply_material_binding, preview_material_bindin
 from .parameters import apply_parameter_changes, parameter_contract, preview_parameter_changes, validate_parameter_values
 from .sketch import apply_sketch_edit, preview_sketch_edit
 from .orchestration import execute_task, plan_task
-from .workspace import get_current_draft, set_current_draft
+from .workspace import engineering_status, get_current_draft, get_current_draft_engineering_status, set_current_draft
 from .workflow import (
     compile_preview,
     compile_template_draft,

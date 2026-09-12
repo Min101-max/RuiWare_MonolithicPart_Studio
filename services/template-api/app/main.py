@@ -15,7 +15,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -85,10 +85,12 @@ from .services.operations import (  # noqa: E402
     plan_task as plan_task_service,
     write_source_package as write_source_package_service,
     get_current_draft as get_current_draft_service,
+    get_current_draft_engineering_status as get_current_draft_engineering_status_service,
     set_current_draft as set_current_draft_service,
 )  # noqa: E402
 from .services.write_context import parse_write_context  # noqa: E402
 from .security import bind_request, release_request, current_owner_id, signed_session  # noqa: E402
+from .event_stream import stream_draft_events  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -443,6 +445,11 @@ def get_current_workspace_draft():
     return get_current_draft_service(repository)
 
 
+@app.get("/api/v1/workspace/current-draft/engineering-status")
+def get_current_workspace_engineering_status(includeDetails: bool = False):
+    return get_current_draft_engineering_status_service(repository, include_details=includeDetails)
+
+
 @app.put("/api/v1/workspace/current-draft")
 def set_current_workspace_draft(body: CurrentDraftRequest, request: Request):
     context = parse_write_context(request, body.model_dump())
@@ -459,6 +466,19 @@ def create_template_draft(draft: TemplateDraft):
 @app.get("/api/v1/template-drafts/{draft_id}", response_model=TemplateDraft)
 def get_template_draft(draft_id: str):
     return get_template_draft_service(repository, draft_id)
+
+
+@app.get("/api/v1/template-drafts/{draft_id}/events")
+async def draft_events(draft_id: str, request: Request):
+    return StreamingResponse(
+        stream_draft_events(repository, draft_id, request, request.headers.get("Last-Event-ID")),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.put("/api/v1/template-drafts/{draft_id}", response_model=TemplateDraft)
@@ -541,7 +561,7 @@ def apply_parameter_changes(draft_id: str, request: ParameterChangesRequest):
 @app.post("/api/v1/template-drafts/{draft_id}/stages/{stage}/complete", response_model=StageActionResult)
 def complete_template_stage(draft_id: str, stage: StageName, request: Request, body: GuardedActionRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
-    expected_revision = context.base_revision if context.actor == "agent" else None
+    expected_revision = context.base_revision
     draft, validation = complete_template_stage_service(repository, stage, draft_id, expected_revision)
     return StageActionResult(draft=draft, validation=validation)
 
@@ -591,7 +611,7 @@ def download_source_package(draft_id: str):
 @app.post("/api/v1/template-drafts/{draft_id}/compile", response_model=CompileResult)
 def compile_template_draft(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
-    expected_revision = context.base_revision if context.actor == "agent" else None
+    expected_revision = context.base_revision
     return compile_template_draft_service(repository, draft_id, ARTIFACT_ROOT, expected_revision)
 
 
@@ -637,6 +657,6 @@ def apply_template_proposal(draft_id: str, body: ProposalApplyRequest, request: 
 @app.post("/api/v1/template-drafts/{draft_id}/publish", response_model=PublishResult)
 def publish_template(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
-    expected_revision = context.base_revision if context.actor == "agent" else None
+    expected_revision = context.base_revision
     released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision)
     return PublishResult(draft=released, version=version, validation=validation)

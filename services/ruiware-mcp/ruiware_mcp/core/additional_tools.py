@@ -22,7 +22,7 @@ ADDITIONAL_TOOLS = [
     {
         "name": "ruiware_get_current_draft_status",
         "description": "读取 GUI 当前选中的零部件工程状态，包括阶段校验、最近编译和发布版本；未选中时不会按更新时间猜测。",
-        "inputSchema": {"type": "object", "properties": {}},
+        "inputSchema": {"type": "object", "properties": {"includeDetails": {"type": "boolean", "default": False}}},
     },
     {
         "name": "ruiware_compile_draft",

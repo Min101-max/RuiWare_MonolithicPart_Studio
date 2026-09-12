@@ -20,6 +20,7 @@ GUI_OWNER_ID = os.getenv("RUIWARE_GUI_OWNER_ID", "local-dev-user")
 SESSION_SECRET = os.getenv("RUIWARE_SESSION_SECRET", "local-development-session-secret")
 _current_owner: ContextVar[str | None] = ContextVar("current_owner", default=None)
 _current_workspace: ContextVar[str | None] = ContextVar("current_workspace", default=None)
+_current_principal: ContextVar[Principal | None] = ContextVar("current_principal", default=None)
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,10 @@ def current_owner_id() -> str | None:
 
 def current_workspace_id() -> str | None:
     return _current_workspace.get()
+
+
+def current_principal() -> Principal | None:
+    return _current_principal.get()
 
 
 def _signed_session(session_id: str) -> str:
@@ -83,12 +88,14 @@ def authenticate(request: Request) -> tuple[Principal, bool]:
 def bind_request(request: Request) -> tuple[Principal, bool, object]:
     principal, created = authenticate(request)
     request.state.principal = principal
+    principal_token = _current_principal.set(principal)
     workspace_token = _current_workspace.set(principal.session_id)
     token = _current_owner.set(principal.owner_id)
-    return principal, created, (token, workspace_token)
+    return principal, created, (token, workspace_token, principal_token)
 
 
 def release_request(token: object) -> None:
-    owner_token, workspace_token = token  # type: ignore[misc]
+    owner_token, workspace_token, principal_token = token  # type: ignore[misc]
     _current_owner.reset(owner_token)
     _current_workspace.reset(workspace_token)
+    _current_principal.reset(principal_token)
