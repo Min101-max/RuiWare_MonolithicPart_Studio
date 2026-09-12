@@ -43,8 +43,99 @@ const parameterDefaults: Record<FeatureRule["featureType"], RuleDefaultParameter
       }),
     },
   ],
-  straightSlot: [],
-  rectangularCutout: [],
+  straightSlot: [
+    {
+      key: "slotWidth",
+      suffix: "slotWidth",
+      label: "槽宽",
+      defaultValue: (rule) =>
+        typeof rule.arguments.width === "number" ? rule.arguments.width : 12,
+      apply: (rule, parameterId) => {
+        const argumentsNext = { ...rule.arguments };
+        delete argumentsNext.width;
+        return {
+          ...rule,
+          arguments: argumentsNext,
+          argumentExpressions: {
+            ...rule.argumentExpressions,
+            width: parameterId,
+          },
+        };
+      },
+    },
+    {
+      key: "slotLength",
+      suffix: "slotLength",
+      label: "槽长",
+      defaultValue: (rule) =>
+        typeof rule.arguments.length === "number" ? rule.arguments.length : 40,
+      apply: (rule, parameterId) => {
+        const argumentsNext = { ...rule.arguments };
+        delete argumentsNext.length;
+        return {
+          ...rule,
+          arguments: argumentsNext,
+          argumentExpressions: {
+            ...rule.argumentExpressions,
+            length: parameterId,
+          },
+        };
+      },
+    },
+    {
+      key: "slotPitch",
+      suffix: "slotPitch",
+      label: "槽间距",
+      defaultValue: (rule) => {
+        const pitch = Number(rule.placement.pitchExpression);
+        return Number.isFinite(pitch) ? pitch : 100;
+      },
+      apply: (rule, parameterId) => ({
+        ...rule,
+        placement: { ...rule.placement, pitchExpression: parameterId },
+      }),
+    },
+  ],
+  rectangularCutout: [
+    {
+      key: "cutoutWidth",
+      suffix: "cutoutWidth",
+      label: "切口宽度",
+      defaultValue: (rule) =>
+        typeof rule.arguments.width === "number" ? rule.arguments.width : 20,
+      apply: (rule, parameterId) => {
+        const argumentsNext = { ...rule.arguments };
+        delete argumentsNext.width;
+        return {
+          ...rule,
+          arguments: argumentsNext,
+          argumentExpressions: {
+            ...rule.argumentExpressions,
+            width: parameterId,
+          },
+        };
+      },
+    },
+    {
+      key: "cutoutHeight",
+      suffix: "cutoutHeight",
+      label: "切口高度",
+      defaultValue: (rule) =>
+        typeof rule.arguments.height === "number" ? rule.arguments.height : 20,
+      apply: (rule, parameterId) => {
+        const argumentsNext = { ...rule.arguments };
+        delete argumentsNext.height;
+        return {
+          ...rule,
+          arguments: argumentsNext,
+          argumentExpressions: {
+            ...rule.argumentExpressions,
+            height: parameterId,
+          },
+        };
+      },
+    },
+  ],
   polygonalCutout: [],
 };
 

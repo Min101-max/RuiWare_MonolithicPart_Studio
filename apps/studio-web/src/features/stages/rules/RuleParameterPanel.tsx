@@ -17,6 +17,7 @@ type Props = {
   pendingParameters: ParameterDefinition[];
   existingParameters: ParameterDefinition[];
   predeclaredParameters: ParameterDefinition[];
+  canCreateParameters: boolean;
   newRuleParameter: NewRuleParameter;
   setNewRuleParameter: (value: NewRuleParameter) => void;
   ruleParameterError: string;
@@ -51,6 +52,7 @@ export function RuleParameterPanel({
   pendingParameters,
   existingParameters,
   predeclaredParameters,
+  canCreateParameters,
   newRuleParameter,
   setNewRuleParameter,
   ruleParameterError,
@@ -96,9 +98,10 @@ export function RuleParameterPanel({
               <strong id="predeclared-parameter-title">预声明参数</strong>
               <button
                 className="icon-btn"
-                title="新增预声明参数"
+                title={canCreateParameters ? "新增预声明参数" : "请先新建规则"}
                 aria-label="新增预声明参数"
                 onClick={openCreateDialog}
+                disabled={!canCreateParameters}
               >
                 <Plus size={14} />
               </button>
