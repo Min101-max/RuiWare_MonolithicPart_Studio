@@ -3371,6 +3371,91 @@ code {
 .parameter-contract-card select[multiple] {
   min-height: 82px;
 }
+.rule-parameter-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.rule-parameter-list {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dfe5e8;
+  border-radius: 7px;
+  background: #fff;
+}
+.rule-parameter-list > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 9px;
+  border-bottom: 1px solid #edf0f2;
+}
+.rule-parameter-list > header strong { font-size: 8px; color: #314451; }
+.rule-parameter-list > header > span {
+  min-width: 16px;
+  color: #75838c;
+  font-size: 8px;
+  text-align: right;
+}
+.rule-parameter-rows { display: flex; flex-direction: column; }
+.rule-parameter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid #f0f3f4;
+}
+.rule-parameter-row:last-child { border-bottom: 0; }
+.rule-parameter-row code,
+.rule-parameter-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #53636c;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rule-parameter-row code { color: #17677a; }
+.rule-parameter-empty {
+  margin: 0;
+  padding: 9px;
+  color: #84919a;
+  font-size: 8px;
+}
+.rule-parameter-dialog {
+  width: min(640px, 100%);
+  padding: 18px;
+  border: 1px solid #d9e1e6;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.25);
+}
+.rule-parameter-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.rule-parameter-dialog-header h2 {
+  margin: 0 0 4px;
+  color: #1f2d38;
+  font-size: 13px;
+}
+.rule-parameter-dialog-header p {
+  margin: 0;
+  color: #647480;
+  font-size: 8px;
+  line-height: 1.45;
+}
+.rule-parameter-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 14px;
+}
 .parameter-source-note {
   display: flex;
   gap: 8px;
@@ -4502,6 +4587,9 @@ code {
 @media (max-width: 1320px) {
 }
 @media (max-width: 760px) {
+  .rule-parameter-lists {
+    grid-template-columns: 1fr;
+  }
   .mode-choice-grid {
     grid-template-columns: 1fr;
   }

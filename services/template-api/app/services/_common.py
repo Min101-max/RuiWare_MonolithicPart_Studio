@@ -9,6 +9,7 @@ from template_core.models import TemplateDraft
 from ..config import ATTACHMENT_ROOT
 from ..errors import api_error
 from ..repository import DuplicateCodeError, Repository, RevisionConflictError
+from ..security import current_owner_id
 
 ALLOWED_ATTACHMENT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".pdf", ".dxf", ".dwg", ".step", ".stp", ".txt", ".csv"}
 
@@ -34,12 +35,14 @@ def save_draft(
     apply_invalidation: bool = True,
 ) -> TemplateDraft:
     try:
-        return repository.save_draft(
+        saved = repository.save_draft(
             draft,
             expected_revision=expected_revision if expected_revision is not None else (draft.revision if draft.id else None),
             reason=reason,
             apply_invalidation=apply_invalidation,
         )
+        repository.claim_draft(saved.id, current_owner_id())
+        return saved
     except RevisionConflictError as error:
         raise api_error("DRAFT_REVISION_CONFLICT", status_code=409, message=str(error), context={"reason": str(error)}) from error
     except DuplicateCodeError as error:

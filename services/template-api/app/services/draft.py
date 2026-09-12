@@ -14,17 +14,20 @@ from ._common import ALLOWED_ATTACHMENT_EXTENSIONS, AttachmentUpdateRequestBody,
 from .proposal import sync_sketch_seed_coordinates
 from .context import validate_stage_with_context
 from .write_context import WriteContext
+from ..security import current_owner_id
 
 
 def create_blank_template_draft(repository: Repository, name: str) -> TemplateDraft:
     draft = TemplateDraft(code=next_template_code(repository), name=name.strip() or "未命名零部件模板")
-    return repository.save_draft(draft, reason="create")
+    saved = repository.save_draft(draft, reason="create")
+    repository.claim_draft(saved.id, current_owner_id())
+    return saved
 
 
 def create_named_template_draft(repository: Repository, name: str) -> tuple[TemplateDraft, bool]:
     """Create a blank draft by name, reusing an active draft for idempotency."""
     normalized_name = name.strip() or "未命名零部件模板"
-    for existing in repository.list_drafts():
+    for existing in repository.list_drafts(owner_id=current_owner_id()):
         if existing.name == normalized_name:
             return existing, False
     return create_blank_template_draft(repository, normalized_name), True
@@ -52,7 +55,9 @@ def update_template_draft(repository: Repository, draft_id: str, draft: Template
 
 def duplicate_template_draft(repository: Repository, draft_id: str) -> TemplateDraft:
     try:
-        return repository.duplicate_draft(draft_id)
+        duplicated = repository.duplicate_draft(draft_id)
+        repository.claim_draft(duplicated.id, current_owner_id())
+        return duplicated
     except KeyError as error:
         raise api_error("DRAFT_NOT_FOUND", status_code=404, context={"draftId": draft_id}) from error
 

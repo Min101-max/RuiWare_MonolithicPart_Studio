@@ -79,7 +79,9 @@ artifacts                      STEP/STL/计划/快照/源包
 
 ## 第五、六阶段：确认、审计和稳定性
 
-写操作通过 `X-RuiWare-Actor`、`X-RuiWare-Source`、`X-RuiWare-Session`、`X-RuiWare-Base-Revision` 和 `X-RuiWare-Confirmed` 传递统一上下文。旧 GUI 请求保持兼容；MCP 写载荷包含版本和确认字段时由客户端自动补充 Agent/MCP 标识。
+GUI 通过签名 `ruiware_session` Cookie 获得会话；MCP 必须配置 `RUIWARE_AGENT_TOKEN` 并使用 Bearer Token。`X-RuiWare-Actor` 和 `X-RuiWare-Source` 只作为兼容输入，服务端不以它们作为身份依据；`X-RuiWare-Session` 仅用于绑定已认证工作区。
+
+本机协作模式可通过环境变量配置：`RUIWARE_AGENT_TOKEN` 设置 MCP Token，`RUIWARE_AGENT_OWNER_ID` 设置 Agent 所属用户，`RUIWARE_GUI_OWNER_ID` 设置本机 GUI 用户，`RUIWARE_SESSION_SECRET` 设置签名会话密钥。默认值仅适用于绑定 `127.0.0.1` 的开发环境；局域网或公网部署必须替换 Token 和会话密钥，并在反向代理层接入正式用户认证。
 
 Repository 使用 SQLite 事务锁保护 revision 检查，审计记录写入 `operation_audit` 表。审计可通过 `GET /api/v1/audit-logs` 或 MCP `ruiware_get_audit_log` 查询；回滚通过 `POST /api/v1/template-drafts/{draftId}/rollback` 或 `ruiware_rollback_draft` 生成新 revision。
 
