@@ -49,7 +49,6 @@ def test_agent_workflow_actions_reject_stale_revision(guarded_draft, path_suffix
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "DRAFT_REVISION_CONFLICT"
 
-
 def test_agent_proposal_apply_rejects_stale_guard_revision(guarded_draft):
     client, draft = guarded_draft
     proposal = {
@@ -100,3 +99,20 @@ def test_agent_template_creation_and_workspace_selection_require_confirmation(tm
     assert create_response.json()["error"]["code"] == "WRITE_CONFIRMATION_REQUIRED"
     assert select_response.status_code == 422
     assert select_response.json()["error"]["code"] == "WRITE_CONFIRMATION_REQUIRED"
+
+
+@pytest.mark.parametrize("path_suffix", [
+    "/stages/templateInfo/complete",
+    "/compile",
+    "/publish",
+])
+def test_gui_workflow_actions_reject_stale_revision(guarded_draft, path_suffix):
+    client, draft = guarded_draft
+
+    response = client.post(
+        f"/api/v1/template-drafts/{draft['id']}{path_suffix}",
+        json={"baseRevision": 1},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "DRAFT_REVISION_CONFLICT"

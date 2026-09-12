@@ -33,30 +33,50 @@ def test_workspace_current_draft_is_persisted_and_does_not_fallback_to_latest(tm
     assert current.json()["draft"]["name"] == "001 C型冷弯立柱"
     assert current.json()["draft"]["id"] != second.id
 
+    status = client.get("/api/v1/workspace/current-draft/engineering-status")
+    assert status.status_code == 200
+    assert status.json()["draftId"] == first.id
+    assert status.json()["stageValidations"]["templateInfo"]["checks"] == []
+    assert status.json()["validationMode"] == "summary"
+
+    detailed = client.get("/api/v1/workspace/current-draft/engineering-status?includeDetails=true")
+    assert detailed.status_code == 200
+    assert detailed.json()["validationMode"] == "detailed"
+    assert detailed.json()["stageValidations"]["templateInfo"]["checks"]
+
 
 def test_current_draft_mcp_tool_reads_shared_selection_only():
     class CurrentDraftClient:
-        def get(self, path):
-            if path == "/workspace/current-draft":
-                return {"draftId": "draft-001", "draft": {"id": "draft-001", "name": "001 C型冷弯立柱", "stageStatus": {}}}
-            if path.endswith("/versions"):
-                return []
-            if path.endswith("/compile-runs/latest"):
-                return None
-            return {"stage": "templateInfo", "complete": True, "checks": []}
+        calls = []
 
-    result = McpApplication(CurrentDraftClient()).call_tool("ruiware_get_current_draft_status", {})
+        def get(self, path):
+            self.calls.append(path)
+            return {
+                "selected": True,
+                "selectionSource": "gui_workspace",
+                "draftId": "draft-001",
+                "draft": {"id": "draft-001", "name": "001 C型冷弯立柱", "stageStatus": {}},
+                "stageStatus": {},
+                "stageValidations": {},
+                "latestCompile": None,
+                "publishedVersions": [],
+                "validationMode": "summary",
+            }
+
+    client = CurrentDraftClient()
+    result = McpApplication(client).call_tool("ruiware_get_current_draft_status", {})
     payload = json.loads(result["content"][0]["text"])
     assert payload["selected"] is True
     assert payload["draftId"] == "draft-001"
     assert payload["draft"]["name"] == "001 C型冷弯立柱"
+    assert client.calls == ["/workspace/current-draft/engineering-status"]
 
 
 def test_current_draft_mcp_tool_reports_missing_selection_without_fallback():
     class NoSelectionClient:
         def get(self, path):
-            assert path == "/workspace/current-draft"
-            return {"draftId": None, "draft": None, "updatedAt": None}
+            assert path == "/workspace/current-draft/engineering-status"
+            return {"selected": False, "draftId": None, "draft": None}
 
     result = McpApplication(NoSelectionClient()).call_tool("ruiware_get_current_draft_status", {})
     payload = json.loads(result["content"][0]["text"])
