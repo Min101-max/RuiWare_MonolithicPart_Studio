@@ -266,7 +266,6 @@ export default function App() {
                 draft={draft}
                 change={change}
                 save={save}
-                onAdoptSavedDraft={adoptSavedDraft}
                 dirty={dirty}
                 showError={showError}
               />
