@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...api_client import RuiWareApiClient
+from ...api_client import RuiWareApiClient, RuiWareApiError
 from ...core.responses import tool_result
 
 
@@ -21,6 +21,19 @@ STAGES = (
 
 def execute(client: RuiWareApiClient, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """读取 GUI 当前选中的零部件及其阶段、编译和发布状态。"""
+    include_details = bool((arguments or {}).get("includeDetails", False))
+    try:
+        if include_details:
+            return tool_result(client.get(
+                "/workspace/current-draft/engineering-status",
+                params={"includeDetails": "true"},
+            ))
+        return tool_result(client.get("/workspace/current-draft/engineering-status"))
+    except RuiWareApiError as error:
+        if error.status != 404:
+            raise
+
+    # 兼容尚未部署聚合接口的旧 API 服务。
     selection = client.get("/workspace/current-draft")
     draft_id = selection.get("draftId")
     if not draft_id or not selection.get("draft"):

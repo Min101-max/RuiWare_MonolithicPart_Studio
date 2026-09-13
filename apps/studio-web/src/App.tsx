@@ -102,6 +102,7 @@ export default function App() {
     notice,
     error,
     syncConflict,
+    remoteChange,
     setStage,
     setMaterials,
     setMaterialSearch,
@@ -161,6 +162,7 @@ export default function App() {
       notice={notice}
       error={error}
       syncConflict={syncConflict}
+      remoteChange={remoteChange}
       onSelectDraft={(draftId) => {
         const selected = drafts.find((item) => item.id === draftId);
         if (selected) chooseDraft(selected);
@@ -266,7 +268,6 @@ export default function App() {
                 draft={draft}
                 change={change}
                 save={save}
-                onAdoptSavedDraft={adoptSavedDraft}
                 dirty={dirty}
                 showError={showError}
               />

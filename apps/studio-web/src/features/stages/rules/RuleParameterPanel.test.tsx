@@ -9,6 +9,7 @@ describe("RuleParameterPanel", () => {
         pendingParameters={[]}
         existingParameters={[]}
         predeclaredParameters={[]}
+        canCreateParameters={true}
         newRuleParameter={{
           id: "",
           displayName: "",

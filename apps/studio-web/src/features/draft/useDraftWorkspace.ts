@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, toErrorNotice, type ErrorNotice } from "../../api";
 import { STAGES } from "../workflow/stageConfig";
+import { useDraftSyncChannel, type DraftChangedEvent } from "./draftSyncChannel";
 import type {
   CompileResult,
   Draft,
@@ -16,12 +17,11 @@ export function preservePreviousCompileArtifacts(previous: CompileResult | null,
   return previous ? { ...failed, artifacts: previous.artifacts, metrics: previous.metrics } : failed;
 }
 
-export const DRAFT_SYNC_INTERVAL_MS = 3000;
-
 export type DraftSyncConflict = {
   localRevision: number;
   remoteRevision: number;
   remoteDraft: Draft;
+  change?: DraftChangedEvent;
 };
 
 export function remoteDraftNeedsSync(local: Draft | null, remote: Draft): boolean {
@@ -61,6 +61,7 @@ export function useDraftWorkspace() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<ErrorNotice | null>(null);
   const [syncConflict, setSyncConflict] = useState<DraftSyncConflict | null>(null);
+  const [remoteChange, setRemoteChange] = useState<DraftChangedEvent | null>(null);
 
   useEffect(() => {
     draftRef.current = draft;
@@ -80,6 +81,7 @@ export function useDraftWorkspace() {
   function chooseDraft(item: Draft) {
     setDraft(structuredClone(item));
     setSyncConflict(null);
+    setRemoteChange(null);
     conflictRevisionRef.current = null;
     setDirty(false);
     setValidation(null);
@@ -136,7 +138,7 @@ export function useDraftWorkspace() {
     }, duration);
   }
 
-  function registerSyncConflict(remoteDraft: Draft) {
+  function registerSyncConflict(remoteDraft: Draft, change?: DraftChangedEvent) {
     const localDraft = draftRef.current;
     if (!localDraft || !remoteDraftNeedsSync(localDraft, remoteDraft)) return;
     if (conflictRevisionRef.current === remoteDraft.revision) return;
@@ -145,32 +147,47 @@ export function useDraftWorkspace() {
       localRevision: localDraft.revision,
       remoteRevision: remoteDraft.revision,
       remoteDraft: structuredClone(remoteDraft),
+      change,
     });
     showNotice("Agent 已修改，请查看变更", 6000);
   }
 
-  function applyRemoteDraft(remoteDraft: Draft) {
+  function applyRemoteDraft(remoteDraft: Draft, change?: DraftChangedEvent) {
     setDraft(structuredClone(remoteDraft));
     setDrafts((items) => items.map((item) => (item.id === remoteDraft.id ? remoteDraft : item)));
     setDirty(false);
     setSyncConflict(null);
+    setRemoteChange(change ?? null);
     conflictRevisionRef.current = null;
     setValidation(null);
     setCompileStale(!!compileRef.current);
     showNotice(`已同步 Agent 修改（R${remoteDraft.revision}）`);
   }
 
-  async function syncCurrentDraft() {
+  async function showRevisionConflict(errorValue: unknown, draftId: string) {
+    if (errorValue instanceof ApiError && errorValue.code === "DRAFT_REVISION_CONFLICT") {
+      try {
+        const remoteDraft = await api.draft(draftId);
+        conflictRevisionRef.current = null;
+        registerSyncConflict(remoteDraft);
+      } catch {
+        // Preserve the original structured conflict error when the refresh also fails.
+      }
+    }
+    showError(errorValue);
+  }
+
+  async function syncCurrentDraft(change?: DraftChangedEvent) {
     const localDraft = draftRef.current;
     if (!localDraft?.id) return;
     try {
       const remoteDraft = await api.draft(localDraft.id);
       if (!remoteDraftNeedsSync(localDraft, remoteDraft)) return;
       setDrafts((items) => items.map((item) => (item.id === remoteDraft.id ? remoteDraft : item)));
-      if (dirtyRef.current) registerSyncConflict(remoteDraft);
-      else applyRemoteDraft(remoteDraft);
+      if (dirtyRef.current) registerSyncConflict(remoteDraft, change);
+      else applyRemoteDraft(remoteDraft, change);
     } catch (errorValue) {
-      // A transient polling failure must not interrupt editing; the next tick retries.
+      // A transient SSE refresh failure must not interrupt editing; reconnecting retries.
     }
   }
 
@@ -199,12 +216,11 @@ export function useDraftWorkspace() {
     }
   }, [stage, draft?.id]);
 
-  useEffect(() => {
-    if (!draft?.id) return;
-    void syncCurrentDraft();
-    const timer = window.setInterval(() => void syncCurrentDraft(), DRAFT_SYNC_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [draft?.id]);
+  useDraftSyncChannel({
+    draftId: draft?.id ?? null,
+    revision: draft?.revision ?? 0,
+    onDraftChanged: (change) => void syncCurrentDraft(change),
+  });
 
   useEffect(() => {
     if (stage !== "material" || !draft?.materialRequirements[0]) return;
@@ -238,13 +254,14 @@ export function useDraftWorkspace() {
     setDirty(false);
     setValidation(null);
     setSyncConflict(null);
+    setRemoteChange(null);
     conflictRevisionRef.current = null;
     if (compileRef.current) setCompileStale(true);
   }
 
   function resolveSyncConflict(action: "reload" | "dismiss") {
     if (!syncConflict) return;
-    if (action === "reload") applyRemoteDraft(syncConflict.remoteDraft);
+    if (action === "reload") applyRemoteDraft(syncConflict.remoteDraft, syncConflict.change);
     else setSyncConflict(null);
   }
 
@@ -261,20 +278,12 @@ export function useDraftWorkspace() {
       setDrafts((items) => items.map((item) => (item.id === saved.id ? saved : item)));
       setDirty(false);
       setSyncConflict(null);
+      setRemoteChange(null);
       conflictRevisionRef.current = null;
       showNotice("已保存为新修订");
       return saved;
     } catch (errorValue) {
-      if (errorValue instanceof ApiError && errorValue.code === "DRAFT_REVISION_CONFLICT") {
-        try {
-          const remoteDraft = await api.draft(current.id);
-          conflictRevisionRef.current = null;
-          registerSyncConflict(remoteDraft);
-        } catch {
-          // Preserve the original structured conflict error when the refresh also fails.
-        }
-      }
-      showError(errorValue);
+      await showRevisionConflict(errorValue, current.id);
       return null;
     } finally {
       setBusy("");
@@ -289,7 +298,7 @@ export function useDraftWorkspace() {
     try {
       setValidation(await api.validateStage(saved.id, stage));
     } catch (errorValue) {
-      showError(errorValue);
+      await showRevisionConflict(errorValue, saved.id);
     } finally {
       setBusy("");
     }
@@ -301,7 +310,7 @@ export function useDraftWorkspace() {
     if (!saved?.id) return;
     setBusy("complete");
     try {
-      const result = await api.completeStage(saved.id, stage);
+      const result = await api.completeStage(saved.id, stage, saved.revision);
       setDraft(result.draft);
       setDrafts((items) => items.map((item) => (item.id === result.draft.id ? result.draft : item)));
       setValidation(result.validation);
@@ -311,7 +320,7 @@ export function useDraftWorkspace() {
         showNotice("阶段检查通过", 2600);
       }
     } catch (errorValue) {
-      showError(errorValue);
+      await showRevisionConflict(errorValue, saved.id);
     } finally {
       setBusy("");
     }
@@ -405,7 +414,7 @@ export function useDraftWorkspace() {
     setBusy("compile");
     setCompileStatus("generating");
     try {
-      const result = await api.compile(saved.id);
+      const result = await api.compile(saved.id, saved.revision);
       if (result.success) {
         setCompile(result);
         setCompileStale(false);
@@ -418,7 +427,7 @@ export function useDraftWorkspace() {
       if (!result.success) showError(result.diagnostics.map((item) => item.message).join("；"));
     } catch (errorValue) {
       setCompileStatus("failed");
-      showError(errorValue);
+      await showRevisionConflict(errorValue, saved.id);
     } finally {
       setBusy("");
     }
@@ -430,13 +439,13 @@ export function useDraftWorkspace() {
     if (!saved?.id) return;
     setBusy("publish");
     try {
-      const result = await api.publish(saved.id);
+      const result = await api.publish(saved.id, saved.revision);
       setDraft(result.draft);
       setDrafts((items) => items.map((item) => (item.id === result.draft.id ? result.draft : item)));
       setVersions(await api.versions(saved.id));
       setNotice(`V${result.version.version} 已发布并冻结`);
     } catch (errorValue) {
-      showError(errorValue);
+      await showRevisionConflict(errorValue, saved.id);
     } finally {
       setBusy("");
     }
@@ -466,6 +475,7 @@ export function useDraftWorkspace() {
     setError,
     setNotice,
     syncConflict,
+    remoteChange,
     resolveSyncConflict,
     chooseDraft,
     change,
