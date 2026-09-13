@@ -38,7 +38,7 @@ foreach ($candidate in $bunCandidates) {
 }
 $NodeExecutable = (Get-Command node.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source)
 if (-not $NodeExecutable) {
-    $runtimeNode = 'C:\Users\Min\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
+    $runtimeNode = Join-Path $env:USERPROFILE '.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'
     if (Test-Path -LiteralPath $runtimeNode) { $NodeExecutable = $runtimeNode }
 }
 $ViteCli = Get-ChildItem (Join-Path $ProjectRoot 'apps\studio-web\node_modules\.pnpm') -Directory -Filter 'vite@*' -ErrorAction SilentlyContinue |
