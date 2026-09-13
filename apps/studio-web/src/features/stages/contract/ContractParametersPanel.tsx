@@ -107,10 +107,16 @@ export function ContractParametersPanel({
             <div className="parameter-fields">
               <div className="parameter-inline-note">
                 <strong>
-                  {parameter.declaredInRuleStage ? "规则页预声明" : "契约页定义"}
+                  {parameter.ruleDefaultFor
+                    ? "规则默认参数"
+                    : parameter.declaredInRuleStage
+                      ? "规则页预声明"
+                      : "契约页定义"}
                 </strong>
                 <small>
-                  {parameter.declaredInRuleStage
+                  {parameter.ruleDefaultFor
+                    ? "随所属规则创建，删除规则时自动移除"
+                    : parameter.declaredInRuleStage
                     ? parameter.contractReady
                       ? "已补全正式契约"
                       : "进入契约页后需要补全"
@@ -455,7 +461,7 @@ export function ContractParametersPanel({
                 "depth",
                 "lip",
                 "thickness",
-              ].includes(parameter.id)}
+              ].includes(parameter.id) || !!parameter.ruleDefaultFor}
               onClick={() => onDeleteParameter(index)}
             >
               <Trash2 size={15} />

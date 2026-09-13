@@ -21,6 +21,7 @@ def guarded_draft(tmp_path, monkeypatch):
 
 def _agent_headers(base_revision: int, *, confirmed: bool = True) -> dict[str, str]:
     return {
+        "Authorization": "Bearer local-agent-token",
         "X-RuiWare-Actor": "agent",
         "X-RuiWare-Source": "mcp",
         "X-RuiWare-Base-Revision": str(base_revision),
@@ -47,7 +48,6 @@ def test_agent_workflow_actions_reject_stale_revision(guarded_draft, path_suffix
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "DRAFT_REVISION_CONFLICT"
-
 
 def test_agent_proposal_apply_rejects_stale_guard_revision(guarded_draft):
     client, draft = guarded_draft
@@ -86,13 +86,13 @@ def test_agent_template_creation_and_workspace_selection_require_confirmation(tm
     create_response = client.post(
         "/api/v1/template-drafts/create",
         json={"name": "未确认创建", "confirmed": False},
-        headers={"X-RuiWare-Actor": "agent", "X-RuiWare-Source": "mcp"},
+        headers={"Authorization": "Bearer local-agent-token", "X-RuiWare-Actor": "agent", "X-RuiWare-Source": "mcp"},
     )
     draft = client.post("/api/v1/template-drafts/blank", json={"name": "GUI 创建"}).json()
     select_response = client.put(
         "/api/v1/workspace/current-draft",
         json={"draftId": draft["id"], "confirmed": False},
-        headers={"X-RuiWare-Actor": "agent", "X-RuiWare-Source": "mcp"},
+        headers={"Authorization": "Bearer local-agent-token", "X-RuiWare-Actor": "agent", "X-RuiWare-Source": "mcp"},
     )
 
     assert create_response.status_code == 422
@@ -100,3 +100,19 @@ def test_agent_template_creation_and_workspace_selection_require_confirmation(tm
     assert select_response.status_code == 422
     assert select_response.json()["error"]["code"] == "WRITE_CONFIRMATION_REQUIRED"
 
+
+@pytest.mark.parametrize("path_suffix", [
+    "/stages/templateInfo/complete",
+    "/compile",
+    "/publish",
+])
+def test_gui_workflow_actions_reject_stale_revision(guarded_draft, path_suffix):
+    client, draft = guarded_draft
+
+    response = client.post(
+        f"/api/v1/template-drafts/{draft['id']}{path_suffix}",
+        json={"baseRevision": 1},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "DRAFT_REVISION_CONFLICT"

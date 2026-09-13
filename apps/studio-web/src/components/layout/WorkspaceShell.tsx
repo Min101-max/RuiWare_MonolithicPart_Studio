@@ -11,6 +11,7 @@ import {
   Save,
 } from "lucide-react";
 import { STAGES } from "../../features/workflow/stageConfig";
+import type { DraftChangedEvent, DraftChangeItem } from "../../features/draft/draftSyncChannel";
 import type { Draft, StageName } from "../../types";
 import type { ErrorNotice } from "../../api/errors";
 
@@ -24,7 +25,8 @@ type WorkspaceShellProps = {
   dirty: boolean;
   notice: string;
   error: ErrorNotice | null;
-  syncConflict: { localRevision: number; remoteRevision: number } | null;
+  syncConflict: { localRevision: number; remoteRevision: number; change?: DraftChangedEvent } | null;
+  remoteChange: DraftChangedEvent | null;
   onSelectDraft: (draftId: string) => void;
   onSelectStage: (stage: StageName) => void;
   onCreateDraft: () => void;
@@ -48,6 +50,7 @@ export function WorkspaceShell({
   notice,
   error,
   syncConflict,
+  remoteChange,
   onSelectDraft,
   onSelectStage,
   onCreateDraft,
@@ -149,6 +152,17 @@ export function WorkspaceShell({
       </aside>
 
       <main className="workspace">
+        {remoteChange && !syncConflict && (
+          <div className="sync-conflict sync-change-summary" role="status">
+            <div>
+              <strong>Agent 修改已同步</strong>
+              <span>
+                R{remoteChange.summary?.fromRevision ?? "?"} → R{remoteChange.revision}
+              </span>
+              <ChangeSummary summary={remoteChange.summary} />
+            </div>
+          </div>
+        )}
         {syncConflict && (
           <div className="sync-conflict" role="alert">
             <div>
@@ -157,6 +171,7 @@ export function WorkspaceShell({
                 Agent 已修改当前模板（R{syncConflict.remoteRevision}），本地仍在编辑 R
                 {syncConflict.localRevision}。
               </span>
+              <ChangeSummary summary={syncConflict.change?.summary} />
             </div>
             <div className="sync-conflict-actions">
               <button type="button" onClick={() => onResolveSyncConflict("dismiss")}>
@@ -196,4 +211,29 @@ export function WorkspaceShell({
       )}
     </div>
   );
+}
+
+function ChangeSummary({ summary }: { summary?: DraftChangedEvent["summary"] }) {
+  if (!summary) return null;
+  const changedItems = [...summary.parameters, ...summary.rules];
+  return (
+    <div className="sync-summary">
+      <span>参数 {summary.parameters.length} 项 · 规则 {summary.rules.length} 项 · 草图 {summary.sketch.changed ? "已变更" : "未变更"}</span>
+      {changedItems.slice(0, 5).map((item) => (
+        <small key={`${item.changeType}-${item.id}`}>
+          {item.label}：{item.changeType === "added" ? "新增" : item.changeType === "removed" ? "删除" : `${formatChangeValue(item.before)} → ${formatChangeValue(item.after)}`}
+        </small>
+      ))}
+      {summary.sketch.changed && <small>草图：{summary.sketch.parts.join("、")}</small>}
+      {summary.affectedStages.length > 0 && (
+        <small>受影响阶段：{summary.affectedStages.map((stage) => STAGES.find((item) => item.id === stage)?.title || stage).join("、")}</small>
+      )}
+    </div>
+  );
+}
+
+function formatChangeValue(value: DraftChangeItem["before"]): string {
+  if (!value) return "无";
+  if ("default" in value) return String(value.default);
+  return JSON.stringify(value);
 }

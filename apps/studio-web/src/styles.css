@@ -398,32 +398,27 @@ code {
   background: #d9821c;
   color: #fff;
 }
-.parameter-assistance-panel {
-  margin-bottom: 12px;
+.sync-change-summary {
+  border-color: #9bcdd0;
+  background: #effafa;
+  color: #245b60;
 }
-.parameter-assistance-actions {
+.sync-change-summary strong {
+  color: #16717a;
+}
+.sync-summary {
   display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 10px;
-}
-.parameter-assistance-result {
-  display: grid;
-  gap: 3px;
-  margin-top: 10px;
-  padding: 8px 10px;
-  border-radius: 5px;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
   font-size: 9px;
 }
-.parameter-assistance-result.valid {
-  border: 1px solid #b9ddcb;
-  background: #f1faf5;
-  color: #255d43;
+.sync-summary small {
+  color: #6a4f21;
+  font-size: 9px;
 }
-.parameter-assistance-result.invalid {
-  border: 1px solid #e4b8b4;
-  background: #fff4f2;
-  color: #8f3b35;
+.sync-change-summary .sync-summary small {
+  color: #356c70;
 }
 .stage-heading {
   max-width: 1510px;
@@ -1433,6 +1428,32 @@ code {
 .face-binding-option strong { font-size: 8px; }
 .face-binding-option code { font-size: 7px; color: #64727b; }
 .semantic-face-contract { margin-top: 12px; }
+.semantic-face-marker-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #52606a; margin-right: 10px; }
+.semantic-face-marker { color: #7c3aed; }
+.semantic-face-marker circle { fill: #f5f3ff; stroke: currentColor; stroke-width: 2; }
+.semantic-face-marker line { stroke: currentColor; stroke-width: 1.5; }
+.semantic-face-marker .semantic-face-marker-source { stroke: #a855f7; stroke-width: 5; stroke-opacity: .42; stroke-dasharray: 7 4; stroke-linecap: round; }
+.semantic-face-marker .semantic-face-marker-origin-halo { fill: #fff; stroke: #fff; stroke-width: 5; }
+.semantic-face-marker .semantic-face-marker-origin-ring { fill: #fff; stroke: #7c3aed; stroke-width: 2.5; }
+.semantic-face-marker .semantic-face-marker-origin-dot { fill: #7c3aed; stroke: #fff; stroke-width: 1; }
+.semantic-face-marker .semantic-face-marker-cross { stroke: #7c3aed; stroke-width: 1.2; }
+.semantic-face-marker .semantic-face-marker-u { stroke: #2563eb; }
+.semantic-face-marker .semantic-face-marker-v { stroke: #16a34a; }
+.semantic-face-marker text { fill: currentColor; font-size: 10px; font-weight: 600; paint-order: stroke; stroke: white; stroke-width: 3px; }
+.semantic-face-marker-out { fill: #64748b; font-size: 9px; }
+.semantic-face-marker .semantic-face-marker-origin-note { fill: #5b21b6; font-size: 9px; font-weight: 500; }
+.semantic-face-marker .semantic-face-marker-label { font-weight: 700; }
+.semantic-face-marker.active circle { fill: #ede9fe; stroke: #6d28d9; stroke-width: 3; }
+.semantic-face-marker.active .semantic-face-marker-origin-dot { fill: #6d28d9; stroke: #fff; stroke-width: 1; }
+.semantic-face-actions { display: flex; align-items: center; gap: 6px; grid-column: 1 / -1; }
+.semantic-face-locate { align-self: end; }
+.semantic-face-locate.active { color: #6d28d9; border-color: #8b5cf6; }
+.semantic-face-unresolved { align-self: end; color: #b45309; font-size: 8px; white-space: nowrap; }
+.semantic-face-marker-legend { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.semantic-face-marker-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 1px solid currentColor; }
+.semantic-face-marker-legend .legend-origin { background: #f5f3ff; color: #7c3aed; }
+.semantic-face-marker-legend .legend-u { width: 14px; height: 3px; border: 0; border-radius: 0; background: #2563eb; }
+.semantic-face-marker-legend .legend-v { width: 14px; height: 3px; border: 0; border-radius: 0; background: #16a34a; }
 .semantic-face-responsibilities {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3371,6 +3392,91 @@ code {
 .parameter-contract-card select[multiple] {
   min-height: 82px;
 }
+.rule-parameter-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.rule-parameter-list {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dfe5e8;
+  border-radius: 7px;
+  background: #fff;
+}
+.rule-parameter-list > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  padding: 0 9px;
+  border-bottom: 1px solid #edf0f2;
+}
+.rule-parameter-list > header strong { font-size: 8px; color: #314451; }
+.rule-parameter-list > header > span {
+  min-width: 16px;
+  color: #75838c;
+  font-size: 8px;
+  text-align: right;
+}
+.rule-parameter-rows { display: flex; flex-direction: column; }
+.rule-parameter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 9px;
+  border-bottom: 1px solid #f0f3f4;
+}
+.rule-parameter-row:last-child { border-bottom: 0; }
+.rule-parameter-row code,
+.rule-parameter-row span {
+  min-width: 0;
+  overflow: hidden;
+  color: #53636c;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rule-parameter-row code { color: #17677a; }
+.rule-parameter-empty {
+  margin: 0;
+  padding: 9px;
+  color: #84919a;
+  font-size: 8px;
+}
+.rule-parameter-dialog {
+  width: min(640px, 100%);
+  padding: 18px;
+  border: 1px solid #d9e1e6;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.25);
+}
+.rule-parameter-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.rule-parameter-dialog-header h2 {
+  margin: 0 0 4px;
+  color: #1f2d38;
+  font-size: 13px;
+}
+.rule-parameter-dialog-header p {
+  margin: 0;
+  color: #647480;
+  font-size: 8px;
+  line-height: 1.45;
+}
+.rule-parameter-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 14px;
+}
 .parameter-source-note {
   display: flex;
   gap: 8px;
@@ -4502,6 +4608,9 @@ code {
 @media (max-width: 1320px) {
 }
 @media (max-width: 760px) {
+  .rule-parameter-lists {
+    grid-template-columns: 1fr;
+  }
   .mode-choice-grid {
     grid-template-columns: 1fr;
   }

@@ -1,0 +1,321 @@
+{
+  "version": "1.0",
+  "inputHash": "2f3e199d9fa9d5932a348021777a6e22b2d1fdcd43e48ba7bd3a9325721c5c21",
+  "semanticFaces": [
+    {
+      "semanticFaceId": "part.face.u.left.inner",
+      "sourceEntityId": "edge.u.left.inner",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.u.left.inner",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          -50.0,
+          30.0,
+          0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          -0.0,
+          1.0,
+          -0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main",
+        "cut.holes.u.image.part_face_u_left_inner.001",
+        "cut.holes.u.image.part_face_u_left_inner.002",
+        "cut.holes.u.image.part_face_u_left_inner.003"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.u.right.outer",
+      "sourceEntityId": "edge.u.right.outer",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.u.right.outer",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          50.0,
+          -30.0,
+          0.0
+        ],
+        "uDirection": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          1.0,
+          -0.0,
+          -0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main",
+        "cut.holes.u.image.part_face_u_right_outer.001",
+        "cut.holes.u.image.part_face_u_right_outer.002",
+        "cut.holes.u.image.part_face_u_right_outer.003"
+      ]
+    },
+    {
+      "semanticFaceId": "part.endFace.start",
+      "sourceEntityId": "section.region.u",
+      "locator": {
+        "kind": "profileRegion",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "section.region.u",
+        "capSide": "start"
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileRegion",
+        "capSide": "start",
+        "origin": [
+          -50.0,
+          -30.0,
+          -0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "normal": [
+          -0.0,
+          -0.0,
+          -1.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.endFace.end",
+      "sourceEntityId": "section.region.u",
+      "locator": {
+        "kind": "profileRegion",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "section.region.u",
+        "capSide": "end"
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileRegion",
+        "capSide": "end",
+        "origin": [
+          -50.0,
+          -30.0,
+          100.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main"
+      ]
+    },
+    {
+      "semanticFaceId": "part.face.mttori77",
+      "sourceEntityId": "edge.u.bottom.outer",
+      "locator": {
+        "kind": "profileEdge",
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "sourceEntityId": "edge.u.bottom.outer",
+        "capSide": null
+      },
+      "resolvedSupport": {
+        "operationId": "body.main",
+        "profileSketchId": "sketch.section.main",
+        "kind": "profileEdge",
+        "capSide": null,
+        "origin": [
+          -50.0,
+          -30.0,
+          0.0
+        ],
+        "uDirection": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "vDirection": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "normal": [
+          -0.0,
+          -1.0,
+          -0.0
+        ],
+        "supportFace": {
+          "type": "planar-face",
+          "resolved": true
+        }
+      },
+      "operationIds": [
+        "body.main",
+        "cut.feature.mtzfgo0p.part_face_mttori77.001",
+        "cut.feature.mtzfgo0p.part_face_mttori77.002",
+        "cut.feature.mtzfgo0p.part_face_mttori77.003"
+      ]
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "part.body",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.start",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "part.endFace.end",
+      "sourceOperation": "body.main"
+    },
+    {
+      "id": "feature.feature.mtzfgo0p.part_face_mttori77.001.center",
+      "sourceOperation": "cut.feature.mtzfgo0p.part_face_mttori77.001"
+    },
+    {
+      "id": "feature.feature.mtzfgo0p.part_face_mttori77.001.wall",
+      "sourceOperation": "cut.feature.mtzfgo0p.part_face_mttori77.001"
+    },
+    {
+      "id": "feature.feature.mtzfgo0p.part_face_mttori77.002.center",
+      "sourceOperation": "cut.feature.mtzfgo0p.part_face_mttori77.002"
+    },
+    {
+      "id": "feature.feature.mtzfgo0p.part_face_mttori77.002.wall",
+      "sourceOperation": "cut.feature.mtzfgo0p.part_face_mttori77.002"
+    },
+    {
+      "id": "feature.feature.mtzfgo0p.part_face_mttori77.003.center",
+      "sourceOperation": "cut.feature.mtzfgo0p.part_face_mttori77.003"
+    },
+    {
+      "id": "feature.feature.mtzfgo0p.part_face_mttori77.003.wall",
+      "sourceOperation": "cut.feature.mtzfgo0p.part_face_mttori77.003"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_left_inner.001.center",
+      "sourceOperation": "cut.holes.u.image.part_face_u_left_inner.001"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_left_inner.001.wall",
+      "sourceOperation": "cut.holes.u.image.part_face_u_left_inner.001"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_left_inner.002.center",
+      "sourceOperation": "cut.holes.u.image.part_face_u_left_inner.002"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_left_inner.002.wall",
+      "sourceOperation": "cut.holes.u.image.part_face_u_left_inner.002"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_left_inner.003.center",
+      "sourceOperation": "cut.holes.u.image.part_face_u_left_inner.003"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_left_inner.003.wall",
+      "sourceOperation": "cut.holes.u.image.part_face_u_left_inner.003"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_right_outer.001.center",
+      "sourceOperation": "cut.holes.u.image.part_face_u_right_outer.001"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_right_outer.001.wall",
+      "sourceOperation": "cut.holes.u.image.part_face_u_right_outer.001"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_right_outer.002.center",
+      "sourceOperation": "cut.holes.u.image.part_face_u_right_outer.002"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_right_outer.002.wall",
+      "sourceOperation": "cut.holes.u.image.part_face_u_right_outer.002"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_right_outer.003.center",
+      "sourceOperation": "cut.holes.u.image.part_face_u_right_outer.003"
+    },
+    {
+      "id": "feature.holes.u.image.part_face_u_right_outer.003.wall",
+      "sourceOperation": "cut.holes.u.image.part_face_u_right_outer.003"
+    }
+  ]
+}

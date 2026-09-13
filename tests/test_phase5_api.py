@@ -14,7 +14,7 @@ def test_agent_mutation_requires_revision_and_confirmation_headers(tmp_path, mon
     response = client.post(
         f"/api/v1/template-drafts/{draft['id']}/parameters/apply",
         json={"baseRevision": draft["revision"], "changes": [], "confirmed": True},
-        headers={"X-RuiWare-Actor": "agent"},
+        headers={"Authorization": "Bearer local-agent-token", "X-RuiWare-Actor": "agent"},
     )
 
     assert response.status_code == 422
@@ -34,6 +34,7 @@ def test_rollback_endpoint_and_audit_query_are_available(tmp_path, monkeypatch):
         json={"targetRevision": first["revision"], "baseRevision": second["revision"], "confirmed": True},
         headers={
             "X-RuiWare-Actor": "agent",
+            "Authorization": "Bearer local-agent-token",
             "X-RuiWare-Base-Revision": str(second["revision"]),
             "X-RuiWare-Confirmed": "true",
         },

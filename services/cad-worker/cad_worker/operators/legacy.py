@@ -33,7 +33,7 @@ from .base_entities import (
     _through_polygon,
     _vector_3d,
 )
-from .postcheck import solid_count as _solid_count
+from ..postcheck import solid_count as _solid_count
 
 
 def _sketch_region_extrude(arguments):

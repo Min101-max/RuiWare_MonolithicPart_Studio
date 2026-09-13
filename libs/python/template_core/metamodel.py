@@ -133,6 +133,7 @@ class ParameterDefinition(BaseModel):
     scope: Literal["template", "partInstance", "component", "product", "projectZone"] = "partInstance"
     declaredInRuleStage: bool = False
     contractReady: bool = True
+    ruleDefaultFor: str | None = None
     description: str = ""
 
     @model_validator(mode="after")

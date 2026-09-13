@@ -109,6 +109,7 @@ export type ParameterDefinition = {
   scope?: "template" | "partInstance" | "component" | "product" | "projectZone";
   declaredInRuleStage?: boolean;
   contractReady?: boolean;
+  ruleDefaultFor?: string | null;
   description?: string;
 };
 export type VariantDefinition = {

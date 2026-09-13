@@ -15,7 +15,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -85,9 +85,12 @@ from .services.operations import (  # noqa: E402
     plan_task as plan_task_service,
     write_source_package as write_source_package_service,
     get_current_draft as get_current_draft_service,
+    get_current_draft_engineering_status as get_current_draft_engineering_status_service,
     set_current_draft as set_current_draft_service,
 )  # noqa: E402
 from .services.write_context import parse_write_context  # noqa: E402
+from .security import bind_request, release_request, current_owner_id, signed_session  # noqa: E402
+from .event_stream import stream_draft_events  # noqa: E402
 
 
 class BindingRequest(BaseModel):
@@ -243,17 +246,35 @@ def _draft_id_from_path(path: str) -> str | None:
 async def write_context_middleware(request: Request, call_next):
     mutating = request.method in {"POST", "PUT", "PATCH", "DELETE"}
     guarded = mutating and not _agent_guard_exempt(request.url.path)
+    principal = None
+    created_session = False
+    security_token = None
     try:
+        principal, created_session, security_token = bind_request(request)
         context = parse_write_context(request, require_write_guard=guarded)
+        draft_id = _draft_id_from_path(request.url.path)
+        if draft_id:
+            repository.ensure_draft_access(
+                draft_id,
+                principal.owner_id,
+                claim_unowned=principal.actor == "gui" and not request.headers.get("Authorization"),
+            )
+        query_draft_id = request.query_params.get("draftId")
+        if query_draft_id:
+            repository.ensure_draft_access(
+                query_draft_id,
+                principal.owner_id,
+                claim_unowned=principal.actor == "gui" and not request.headers.get("Authorization"),
+            )
     except HTTPException as error:
         draft_id = _draft_id_from_path(request.url.path)
         before = repository.get_draft_optional(draft_id) if draft_id else None
         detail = error.detail if isinstance(error.detail, dict) else {}
         repository.record_audit(
             action=f"{request.method} {request.url.path}",
-            actor=request.headers.get("X-RuiWare-Actor", "gui"),
-            source=request.headers.get("X-RuiWare-Source", "gui"),
-            session_id=request.headers.get("X-RuiWare-Session"),
+            actor=principal.actor if principal else "unknown",
+            source=principal.source if principal else "unknown",
+            session_id=principal.session_id if principal else None,
             draft_id=draft_id,
             before_revision=before.revision if before else None,
             after_revision=before.revision if before else None,
@@ -262,10 +283,18 @@ async def write_context_middleware(request: Request, call_next):
             error_code=detail.get("code"),
             metadata={"statusCode": error.status_code},
         )
+        if security_token is not None:
+            release_request(security_token)
         return await http_exception_handler(request, error)
     draft_id = _draft_id_from_path(request.url.path)
     before = repository.get_draft_optional(draft_id) if draft_id else None
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    finally:
+        if security_token is not None:
+            release_request(security_token)
+    if created_session:
+        response.set_cookie("ruiware_session", signed_session(principal.session_id), httponly=True, samesite="lax")
     if mutating and request.url.path != "/api/v1/template-drafts/{draft_id}/rollback" and not request.url.path.endswith("/rollback"):
         after = repository.get_draft_optional(draft_id) if draft_id else None
         repository.record_audit(
@@ -408,12 +437,17 @@ def create_named_template_draft(body: NewDraftRequest, request: Request):
 
 @app.get("/api/v1/template-drafts", response_model=list[TemplateDraft])
 def list_template_drafts(includeArchived: bool = False):
-    return repository.list_drafts(include_archived=includeArchived)
+    return repository.list_drafts(include_archived=includeArchived, owner_id=current_owner_id())
 
 
 @app.get("/api/v1/workspace/current-draft")
 def get_current_workspace_draft():
     return get_current_draft_service(repository)
+
+
+@app.get("/api/v1/workspace/current-draft/engineering-status")
+def get_current_workspace_engineering_status(includeDetails: bool = False):
+    return get_current_draft_engineering_status_service(repository, include_details=includeDetails)
 
 
 @app.put("/api/v1/workspace/current-draft")
@@ -432,6 +466,19 @@ def create_template_draft(draft: TemplateDraft):
 @app.get("/api/v1/template-drafts/{draft_id}", response_model=TemplateDraft)
 def get_template_draft(draft_id: str):
     return get_template_draft_service(repository, draft_id)
+
+
+@app.get("/api/v1/template-drafts/{draft_id}/events")
+async def draft_events(draft_id: str, request: Request):
+    return StreamingResponse(
+        stream_draft_events(repository, draft_id, request, request.headers.get("Last-Event-ID")),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.put("/api/v1/template-drafts/{draft_id}", response_model=TemplateDraft)
@@ -514,7 +561,7 @@ def apply_parameter_changes(draft_id: str, request: ParameterChangesRequest):
 @app.post("/api/v1/template-drafts/{draft_id}/stages/{stage}/complete", response_model=StageActionResult)
 def complete_template_stage(draft_id: str, stage: StageName, request: Request, body: GuardedActionRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
-    expected_revision = context.base_revision if context.actor == "agent" else None
+    expected_revision = context.base_revision
     draft, validation = complete_template_stage_service(repository, stage, draft_id, expected_revision)
     return StageActionResult(draft=draft, validation=validation)
 
@@ -564,7 +611,7 @@ def download_source_package(draft_id: str):
 @app.post("/api/v1/template-drafts/{draft_id}/compile", response_model=CompileResult)
 def compile_template_draft(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
-    expected_revision = context.base_revision if context.actor == "agent" else None
+    expected_revision = context.base_revision
     return compile_template_draft_service(repository, draft_id, ARTIFACT_ROOT, expected_revision)
 
 
@@ -610,6 +657,6 @@ def apply_template_proposal(draft_id: str, body: ProposalApplyRequest, request: 
 @app.post("/api/v1/template-drafts/{draft_id}/publish", response_model=PublishResult)
 def publish_template(draft_id: str, request: Request, body: GuardedActionRequest | None = None):
     context = parse_write_context(request, body.model_dump() if body else None, require_write_guard=True)
-    expected_revision = context.base_revision if context.actor == "agent" else None
+    expected_revision = context.base_revision
     released, version, validation = publish_template_service(repository, draft_id, ARTIFACT_ROOT, ATTACHMENT_ROOT, expected_revision)
     return PublishResult(draft=released, version=version, validation=validation)

@@ -36,12 +36,37 @@ def parse_write_context(
     require_write_guard: bool = False,
 ) -> WriteContext:
     """Parse additive headers/body metadata without changing legacy request shapes."""
+    principal = getattr(request.state, "principal", None)
+    if principal is not None:
+        context = WriteContext(
+            actor=principal.actor,
+            source=principal.source,
+            session_id=principal.session_id,
+            base_revision=None,
+            confirmed=False,
+        )
+        body = body_context or {}
+        revision_value = request.headers.get("X-RuiWare-Base-Revision") or body.get("baseRevision")
+        confirmed_value = request.headers.get("X-RuiWare-Confirmed")
+        if confirmed_value is None:
+            confirmed_value = body.get("confirmed", False)
+        context = WriteContext(
+            actor=context.actor,
+            source=context.source,
+            session_id=context.session_id,
+            base_revision=int(revision_value) if revision_value is not None else None,
+            confirmed=_bool(confirmed_value, field="confirmed"),
+        )
+        if require_write_guard and context.actor == "agent":
+            if context.base_revision is None:
+                raise api_error("WRITE_REVISION_REQUIRED", status_code=422)
+            if not context.confirmed:
+                raise api_error("WRITE_CONFIRMATION_REQUIRED", status_code=422)
+        return context
     body = body_context or {}
-    actor_value = request.headers.get("X-RuiWare-Actor") or body.get("actor") or "gui"
-    if actor_value not in {"gui", "agent"}:
-        raise api_error("WRITE_CONTEXT_INVALID", status_code=422, context={"field": "actor"})
-    source = request.headers.get("X-RuiWare-Source") or body.get("source") or ("mcp" if actor_value == "agent" else "gui")
-    session_id = request.headers.get("X-RuiWare-Session") or body.get("sessionId")
+    actor_value = "gui"
+    source = "gui"
+    session_id = None
     revision_value = request.headers.get("X-RuiWare-Base-Revision")
     if revision_value is None:
         revision_value = body.get("baseRevision")

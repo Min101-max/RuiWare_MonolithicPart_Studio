@@ -35,9 +35,11 @@ class RuiWareApiClient:
         self.base_url = (base_url or os.getenv("RUIWARE_API_URL") or "http://127.0.0.1:8010/api/v1").rstrip("/")
         self.max_retries = max(0, max_retries)
         self.sleep_fn = sleep_fn
+        self.agent_token = os.getenv("RUIWARE_AGENT_TOKEN", "local-agent-token")
+        self.session_id = os.getenv("RUIWARE_SESSION_ID")
 
     def get(self, path: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> Any:
-        return self._request("GET", path, params=params, headers=headers, retry_safe=True)
+        return self._request("GET", path, params=params, headers=self._context_headers(None, headers), retry_safe=True)
 
     def post(self, path: str, payload: dict[str, Any] | None = None, *, headers: dict[str, str] | None = None, retry_safe: bool = False) -> Any:
         return self._request("POST", path, payload, headers=self._context_headers(payload, headers), retry_safe=retry_safe)
@@ -51,6 +53,7 @@ class RuiWareApiClient:
         result = {key: value for key, value in (headers or {}).items() if key.lower() not in protected}
         result["X-RuiWare-Actor"] = "agent"
         result["X-RuiWare-Source"] = "mcp"
+        result["Authorization"] = f"Bearer {os.getenv('RUIWARE_AGENT_TOKEN', 'local-agent-token')}"
         if not isinstance(payload, dict):
             return result
         if "baseRevision" in payload:
@@ -59,6 +62,8 @@ class RuiWareApiClient:
             result["X-RuiWare-Confirmed"] = str(payload["confirmed"]).lower()
         if payload.get("sessionId"):
             result["X-RuiWare-Session"] = str(payload["sessionId"])
+        elif os.getenv("RUIWARE_SESSION_ID"):
+            result["X-RuiWare-Session"] = os.environ["RUIWARE_SESSION_ID"]
         return result
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None, retry_safe: bool = False) -> Any:

@@ -128,6 +128,20 @@
 - `compile/RulesSimulationPanel.tsx`：规则模拟面板。
 - `admission/AdmissionStage.tsx`：发布准入阶段。
 
+### 2.14 `rules` 目录
+
+- `RulesStage.tsx`：制造特征规则页面，负责规则创建、特征类型切换、参数绑定和多边形预设。
+- `RuleParameterPanel.tsx`：规则页参数列表和规则参数创建界面。
+- `ruleDefaultParameters.ts`：按特征类型生成内置默认参数，并维护参数与规则表达式之间的绑定关系。
+- `ruleParameterVisibility.ts`：根据是否存在规则，筛选规则页应该展示的参数。
+- `ruleDefaultParameters.test.ts`：验证内置参数生成、参数 ID 冲突递增和规则表达式绑定。
+- `ruleParameterVisibility.test.ts`：验证无规则时隐藏规则参数、存在规则时展示规则参数。
+
+内置默认参数优先使用业务参数名作为 ID，例如 `holeDiameter`、`slotWidth` 和
+`cutoutHeight`。当同一草稿中已有同名参数时，统一生成 `holeDiameter_2`、
+`holeDiameter_3` 这样的递增 ID，避免不同规则之间发生覆盖。用户手动创建的参数
+仍使用用户填写的 ID，不会被这套规则改写。
+
 ## 3. 后端 `services/template-api`
 
 ### 3.1 顶层入口
@@ -135,6 +149,7 @@
 - `app/main.py`：FastAPI 入口，路由、启动装配、静态资源挂载。
 - `app/config.py`：路径、数据库和运行配置。
 - `app/errors.py`：统一错误码、错误响应和异常处理。
+- `app/security.py`：签名 GUI 会话、Agent Token、身份上下文和草稿归属边界。
 - `app/repository.py`：SQLite 持久层，管理草稿、绑定、编译记录和版本。
 - `app/ai_actions.py`：AI 提案解析、比对和应用。
 
@@ -184,9 +199,13 @@
 - `cad_worker/__init__.py`：包标记文件。
 - `cad_worker/cli.py`：命令行入口，读取计划并执行。
 - `cad_worker/geometry.py`：几何执行总入口，负责调度整个执行链。
-- `cad_worker/body_ops.py`：基础实体生成、放样、折弯、薄壁中心线等实体算子。
-- `cad_worker/feature_ops.py`：加工特征与布尔切削算子。
-- `cad_worker/sweep_ops.py`：扫掠相关算子与路径处理。
+- `cad_worker/operators/`：全部几何算子实现目录，按基础实体、基体、加工特征和扫掠职责分组。
+- `cad_worker/operators/base_entities.py`：点、线、面、轮廓和基础实体构造。
+- `cad_worker/operators/body_ops.py`：基体生成、放样、折弯、薄壁中心线等实体算子。
+- `cad_worker/operators/feature_ops.py`：加工特征与布尔切削算子。
+- `cad_worker/operators/sweep_ops.py`：扫掠相关算子与路径处理。
+- `cad_worker/operators/legacy.py`：旧版单文件算子实现，仅保留历史兼容，不作为新执行入口。
+- `cad_worker/base_entities.py`、`cad_worker/body_ops.py`、`cad_worker/feature_ops.py`、`cad_worker/sweep_ops.py`：旧导入路径兼容转发，不再放置实现代码。
 - `cad_worker/exporters.py`：STEP / STL / 语义图 / 诊断文件导出。
 - `cad_worker/postcheck.py`：B-Rep 后置检查与实体数量统计。
 
@@ -382,6 +401,9 @@ Repository
 
 当前已经具备的安全能力：
 
+- API 通过签名 `ruiware_session` Cookie 识别 GUI 会话；MCP 必须使用 `Authorization: Bearer` 对应的 Agent Token，不能仅凭 `X-RuiWare-Actor` 或 `X-RuiWare-Source` 伪造身份。
+- 草稿归属由已验证身份决定，工作区选择由签名 GUI 会话或 Agent 的受控工作区标识决定；同一 Agent 如需读取 GUI 当前选择，应配置与 GUI 相同的工作区会话标识。
+
 - GUI 和 Agent 都不能直接绕过模板 API 操作数据库，草稿统一通过 `Repository` 保存。
 - 阶段完成、参数契约、草图、材料、CAD 编译和发布均由后端及领域层再次校验，前端校验不是最终安全边界。
 - MCP 工具按只读、预览和写入能力组织；草图求解、规则试算和状态读取默认不保存草稿。
@@ -411,7 +433,17 @@ Repository
 
 因此，当前架构的安全结论是：本机单用户场景基本可用；多人协作需要补齐会话隔离、统一并发控制和权限；公网生产部署前还需要认证、授权、审计和更严格的确认机制。
 
-## 7. 现有文档
+## 7. 今日变更记录（2026-09-12）
+
+- 简化规则内置默认参数 ID：移除规则 ID 前缀，改为直接使用参数后缀，例如将
+  `feature_mty4lq4e_holeDiameter` 改为 `holeDiameter`。
+- 统一 `RulesStage.tsx` 中规则默认参数、可填写参数和多边形预设参数的 ID 生成逻辑，
+  全部复用 `nextAvailableParameterId`，重复 ID 自动使用数字后缀。
+- 同步更新规则默认参数和参数可见性测试，覆盖新命名、表达式引用同步以及冲突递增场景。
+- 本次修改不改变参数显示名称、规则业务流程或用户自定义参数；已保存的旧参数 ID 不会被
+  自动批量迁移，以避免破坏历史表达式引用。
+
+## 8. 现有文档
 
 - `docs/ARCHITECTURE.md`：当前架构说明。
 - `docs/DEVELOPMENT.md`：开发说明。
@@ -424,7 +456,7 @@ Repository
 - `docs/USER-GUIDE.md`：用户说明。
 - `docs/adr/*.md`：架构决策记录。
 
-## 8. 读法建议
+## 9. 读法建议
 
 - 先看 `apps/studio-web/src/App.tsx` 和 `src/features/draft/useDraftWorkspace.ts`，能最快理解 GUI 主线。
 - 再看 `services/template-api/app/main.py`、`app/repository.py` 和 `app/services/operations.py`，能理解后端业务流。

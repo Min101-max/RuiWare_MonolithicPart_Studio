@@ -1,20 +1,39 @@
 import { useState } from "react";
-import { ArrowRight, GitBranch, Plus, Trash2, Variable, X } from "lucide-react";
+import { ArrowRight, GitBranch, Plus, Trash2, X } from "lucide-react";
 import { Field, NumberInput, PanelTitle } from "../../../components/ui/FormParts";
 import { RuleLocalPreview } from "../review/compile/RuleLocalPreview";
-import {
-  normalizeParameterAliasReferences,
-  parameterDefaultForType,
-  parameterValueType,
-  renameParameterReferences,
-} from "../../authoring/authoringUtils";
 import type { Draft, FeatureRule, ParameterDefinition } from "../../../types";
 import {
   RuleParameterPanel,
   type NewRuleParameter,
 } from "./RuleParameterPanel";
+import {
+  addRuleDefaultParameters,
+  nextAvailableParameterId,
+  removeRuleDefaultParameters,
+} from "./ruleDefaultParameters";
+import { getRuleParameterGroups } from "./ruleParameterVisibility";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
+
+const nextRuleId = (rules: FeatureRule[]) => {
+  const existingIds = new Set(rules.map((rule) => rule.id));
+  const baseId = uid("feature");
+  let ruleId = baseId;
+  let index = 2;
+  while (existingIds.has(ruleId)) ruleId = `${baseId}_${index++}`;
+  return ruleId;
+};
+
+const defaultNewRuleParameter = (): NewRuleParameter => ({
+  id: "",
+  displayName: "",
+  valueType: "number",
+  unit: "mm",
+  default: 100,
+  minimum: 0,
+  maximum: 1000,
+});
 
 const scalar = (value: string): string | number | boolean => {
   if (value === "true") return true;
@@ -31,86 +50,16 @@ export function RulesStage({
   change: (d: Draft) => void;
 }) {
   const semanticFaces = draft.geometryRecipe.semanticFaces;
-  const declaredParameters = draft.parameterDefinitions.filter(
-    (parameter) => parameter.declaredInRuleStage,
-  );
-  const pendingParameters = declaredParameters.filter(
-    (parameter) => !parameter.contractReady,
-  );
+  const {
+    existingParameters,
+    predeclaredParameters,
+    pendingParameters,
+    canCreateParameters,
+  } = getRuleParameterGroups(draft);
   const [ruleParameterError, setRuleParameterError] = useState("");
-  const [ruleParameterRenameErrors, setRuleParameterRenameErrors] = useState<
-    Record<string, string>
-  >({});
-  const [newRuleParameter, setNewRuleParameter] = useState<NewRuleParameter>({
-    id: "",
-    displayName: "",
-    valueType: "number",
-    unit: "mm",
-    default: 100,
-    minimum: 0,
-    maximum: 1000,
-  });
+  const [newRuleParameter, setNewRuleParameter] = useState<NewRuleParameter>(defaultNewRuleParameter);
   const setRules = (featureRules: FeatureRule[]) =>
     change({ ...draft, featureRules });
-  const editParameter = (parameterId: string, patch: Partial<ParameterDefinition>) =>
-    change({
-      ...draft,
-      parameterDefinitions: draft.parameterDefinitions.map((parameter) =>
-        parameter.id === parameterId
-          ? {
-              ...parameter,
-              ...patch,
-              ...(parameter.declaredInRuleStage
-                ? { contractReady: false }
-                : {}),
-            }
-          : parameter,
-      ),
-    });
-  const editParameterDisplayName = (parameter: ParameterDefinition, displayName: string) => {
-    const normalized = normalizeParameterAliasReferences(draft, parameter.id, [
-      parameter.displayName || "",
-      parameter.label || "",
-    ]);
-    change({
-      ...normalized,
-      parameterDefinitions: normalized.parameterDefinitions.map((item) =>
-        item.id === parameter.id
-          ? {
-              ...item,
-              label: displayName,
-              displayName,
-              ...(item.declaredInRuleStage ? { contractReady: false } : {}),
-            }
-          : item,
-      ),
-    });
-  };
-  const renameRuleParameter = (previousId: string, rawNextId: string) => {
-    const nextId = rawNextId.trim();
-    if (nextId === previousId) return true;
-    if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(nextId)) {
-      setRuleParameterRenameErrors((errors) => ({
-        ...errors,
-        [previousId]: "ID 须以字母开头，只能包含字母、数字和下划线。",
-      }));
-      return false;
-    }
-    if (draft.parameterDefinitions.some((parameter) => parameter.id === nextId)) {
-      setRuleParameterRenameErrors((errors) => ({
-        ...errors,
-        [previousId]: "该参数 ID 已存在。",
-      }));
-      return false;
-    }
-    change(renameParameterReferences(draft, previousId, nextId));
-    setRuleParameterRenameErrors((errors) => {
-      const next = { ...errors };
-      delete next[previousId];
-      return next;
-    });
-    return true;
-  };
   const createRuleParameter = (parameter: {
     id: string;
     label: string;
@@ -143,15 +92,19 @@ export function RulesStage({
     contractReady: false,
     description: "规则页预声明，进入契约页后补全来源、作用域与发布要求。",
   });
+  const resetNewRuleParameter = () => {
+    setNewRuleParameter(defaultNewRuleParameter());
+    setRuleParameterError("");
+  };
   const addRuleParameter = () => {
     const id = newRuleParameter.id.trim();
     if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(id)) {
       setRuleParameterError("参数 ID 需以字母开头，只能包含字母、数字和下划线。");
-      return;
+      return false;
     }
     if (draft.parameterDefinitions.some((parameter) => parameter.id === id)) {
       setRuleParameterError("参数 ID 已存在。");
-      return;
+      return false;
     }
     if (
       newRuleParameter.valueType === "number" ||
@@ -159,14 +112,14 @@ export function RulesStage({
     ) {
       if (newRuleParameter.minimum > newRuleParameter.maximum) {
         setRuleParameterError("最小值不能大于最大值。");
-        return;
+        return false;
       }
       if (
         newRuleParameter.minimum > newRuleParameter.default ||
         newRuleParameter.default > newRuleParameter.maximum
       ) {
         setRuleParameterError("需满足最小值 ≤ 标称值 ≤ 最大值。");
-        return;
+        return false;
       }
     }
     change({
@@ -185,16 +138,8 @@ export function RulesStage({
         }),
       ],
     });
-    setNewRuleParameter({
-      id: "",
-      displayName: "",
-      valueType: "number",
-      unit: "mm",
-      default: 100,
-      minimum: 0,
-      maximum: 1000,
-    });
-    setRuleParameterError("");
+    resetNewRuleParameter();
+    return true;
   };
   const edit = (i: number, patch: Partial<FeatureRule>) =>
     setRules(
@@ -202,11 +147,9 @@ export function RulesStage({
         n === i ? { ...rule, ...patch } : rule,
       ),
     );
-  const addRule = () =>
-    setRules([
-      ...draft.featureRules,
-      {
-        id: uid("feature"),
+  const addRule = () => {
+    const newRule: FeatureRule = {
+        id: nextRuleId(draft.featureRules),
         name: "新制造规则",
         featureType: "circularHole",
         enabled: true,
@@ -222,8 +165,17 @@ export function RulesStage({
         maximumCount: 200,
         semanticGroup: null,
         description: "",
-      },
-    ]);
+      };
+    const next = addRuleDefaultParameters(
+      newRule,
+      draft.parameterDefinitions,
+    );
+    change({
+      ...draft,
+      featureRules: [...draft.featureRules, next.rule],
+      parameterDefinitions: next.parameterDefinitions,
+    });
+  };
   const changeArgumentMode = (
     index: number,
     rule: FeatureRule,
@@ -259,8 +211,9 @@ export function RulesStage({
     index: number,
     rule: FeatureRule,
     featureType: FeatureRule["featureType"],
-  ) =>
-    edit(index, {
+  ) => {
+    const nextRule: FeatureRule = {
+      ...rule,
       featureType,
       arguments:
         featureType === "circularHole" ? { x: 0, diameter: 12 }
@@ -278,7 +231,20 @@ export function RulesStage({
               { uExpression: "-10", vExpression: "length / 2 + 10" },
             ]
           : rule.polygonVertices,
+    };
+    const parameterDefinitions = removeRuleDefaultParameters(
+      draft.parameterDefinitions,
+      rule.id,
+    );
+    const next = addRuleDefaultParameters(nextRule, parameterDefinitions);
+    change({
+      ...draft,
+      parameterDefinitions: next.parameterDefinitions,
+      featureRules: draft.featureRules.map((item, itemIndex) =>
+        itemIndex === index ? next.rule : item,
+      ),
     });
+  };
   const editVertex = (
     index: number,
     rule: FeatureRule,
@@ -310,15 +276,8 @@ export function RulesStage({
         n === dimensionIndex ? { ...dimension, ...patch } : dimension,
       ),
     });
-  const uniqueParameterId = (rule: FeatureRule, suffix: string) => {
-    const stem = `${rule.id.replace(/[^A-Za-z0-9_]/g, "_")}_${suffix}`.replace(/^[^A-Za-z]+/, "feature_");
-    let candidate = stem;
-    let sequence = 2;
-    while (draft.parameterDefinitions.some((parameter) => parameter.id === candidate)) candidate = `${stem}_${sequence++}`;
-    return candidate;
-  };
-  const addInstanceParameter = (ruleIndex: number, rule: FeatureRule, suffix: string, label: string, apply: (id: string) => Partial<FeatureRule>) => {
-    const id = uniqueParameterId(rule, suffix);
+  const addInstanceParameter = (ruleIndex: number, suffix: string, label: string, apply: (id: string) => Partial<FeatureRule>) => {
+    const id = nextAvailableParameterId(draft.parameterDefinitions, suffix);
     const parameter = createRuleParameter({
       id,
       label,
@@ -341,16 +300,14 @@ export function RulesStage({
       : kind === "trapezoid"
         ? [["bottomWidth", "底边宽度", 50], ["topWidth", "顶边宽度", 30], ["cutoutHeight", "切口高度", 30]]
         : [["cutoutWidth", "切口宽度", 48], ["cutoutHeight", "切口高度", 32], ["notchWidth", "缺口宽度", 20], ["notchHeight", "缺口高度", 14]];
-    const usedIds = new Set(draft.parameterDefinitions.map((parameter) => parameter.id));
     const newParameters: ParameterDefinition[] = [];
     const profileDimensions = [...rule.profileDimensions];
     for (const [id, label, defaultValue] of dimensions) {
       if (profileDimensions.some((dimension) => dimension.id === id)) continue;
-      const stem = `${rule.id.replace(/[^A-Za-z0-9_]/g, "_")}_${id}`;
-      let parameterId = stem;
-      let suffix = 2;
-      while (usedIds.has(parameterId)) parameterId = `${stem}_${suffix++}`;
-      usedIds.add(parameterId);
+      const parameterId = nextAvailableParameterId(
+        [...draft.parameterDefinitions, ...newParameters],
+        id,
+      );
       newParameters.push(createRuleParameter({
         id: parameterId,
         label,
@@ -402,15 +359,14 @@ export function RulesStage({
       </div>
       <RuleParameterPanel
         pendingParameters={pendingParameters}
-        declaredParameters={declaredParameters}
+        existingParameters={existingParameters}
+        predeclaredParameters={predeclaredParameters}
+        canCreateParameters={canCreateParameters}
         newRuleParameter={newRuleParameter}
         setNewRuleParameter={setNewRuleParameter}
         ruleParameterError={ruleParameterError}
-        ruleParameterRenameErrors={ruleParameterRenameErrors}
         addRuleParameter={addRuleParameter}
-        renameRuleParameter={renameRuleParameter}
-        editParameterDisplayName={editParameterDisplayName}
-        editParameter={editParameter}
+        resetNewRuleParameter={resetNewRuleParameter}
       />
       {draft.featureRules.length === 0 ? (
         <div className="empty-canvas">
@@ -456,7 +412,14 @@ export function RulesStage({
                     <button
                       className="delete-icon"
                       onClick={() =>
-                        setRules(draft.featureRules.filter((_, n) => n !== i))
+                        change({
+                          ...draft,
+                          featureRules: draft.featureRules.filter((_, n) => n !== i),
+                          parameterDefinitions: removeRuleDefaultParameters(
+                            draft.parameterDefinitions,
+                            rule.id,
+                          ),
+                        })
                       }
                     >
                       <Trash2 size={15} />
@@ -529,7 +492,7 @@ export function RulesStage({
                     <div className="placement-value-row">
                       {rule.placement.mode === "linearArray" && <Field label="首项距起始端" hint="从所选语义面的局部 U/V 起始边界量取。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.startMarginExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, startMarginExpression: e.target.value } })} /></code></Field>}
                       <Field label={rule.placement.mode === "symmetric" ? "相邻间距表达式" : "间距表达式"} hint="填参数 ID（如 holePitch）即可在实例化时输入；也可在参数页把该参数设为公式派生。"><code className="code-input"><input list="feature-parameter-options" value={rule.placement.pitchExpression} onChange={(e) => edit(i, { placement: { ...rule.placement, pitchExpression: e.target.value } })} /></code></Field>
-                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, rule, "pitch", `${rule.name}间距`, (id) => ({ placement: { ...rule.placement, pitchExpression: id } }))}><Plus size={13} />创建可填写间距参数</button>
+                      <button className="text-btn compact" onClick={() => addInstanceParameter(i, "pitch", `${rule.name}间距`, (id) => ({ placement: { ...rule.placement, pitchExpression: id } }))}><Plus size={13} />创建可填写间距参数</button>
                     </div>
                   ) : rule.placement.mode === "equalSpan" ? (
                     <div className="form-grid two placement-margins">
@@ -560,7 +523,7 @@ export function RulesStage({
                     ))}
                     <div className="contour-actions">
                       <button className="text-btn" onClick={() => edit(i, { profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "新尺寸", parameterId: draft.parameterDefinitions.find((parameter) => parameter.valueType === "number" || parameter.valueType === "integer")?.id || "length" }] })}><Plus size={13} />绑定已有参数</button>
-                      <button className="text-btn" onClick={() => addInstanceParameter(i, rule, "cutoutSize", `${rule.name}尺寸`, (id) => ({ profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "切口尺寸", parameterId: id }] }))}><Plus size={13} />创建可填写尺寸参数</button>
+                      <button className="text-btn" onClick={() => addInstanceParameter(i, "cutoutSize", `${rule.name}尺寸`, (id) => ({ profileDimensions: [...rule.profileDimensions, { id: `dimension${rule.profileDimensions.length + 1}`, label: "切口尺寸", parameterId: id }] }))}><Plus size={13} />创建可填写尺寸参数</button>
                     </div>
                  </div>
                 )}
