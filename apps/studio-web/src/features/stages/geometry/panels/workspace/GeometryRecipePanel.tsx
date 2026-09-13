@@ -60,6 +60,11 @@ type GeometryRecipePanelProps = {
     GeometryRecipe["operations"][number],
     "arguments" | "argumentExpressions" | "sourceRefs"
   >;
+  showSemanticFaceMarkers?: boolean;
+  setShowSemanticFaceMarkers?: (value: boolean) => void;
+  highlightedSemanticFaceId?: string | null;
+  semanticFaceMarkerIds?: string[];
+  onLocateSemanticFace?: (value: string) => void;
 };
 
 export function GeometryRecipePanel({
@@ -76,6 +81,11 @@ export function GeometryRecipePanel({
   operators,
   operatorStatus,
   operatorDefaults,
+  showSemanticFaceMarkers = true,
+  setShowSemanticFaceMarkers,
+  highlightedSemanticFaceId,
+  semanticFaceMarkerIds = [],
+  onLocateSemanticFace,
 }: GeometryRecipePanelProps) {
   return (
     <>
@@ -354,17 +364,16 @@ export function GeometryRecipePanel({
             icon={Box}
             title="几何语义面"
             subtitle="规则仍通过语义面 ID 引用；语义面内部由来源轮廓边定位真实面，再用局部 U/V 表达端距和阵列范围。"
-            actions={
-              <button className="mini-btn" onClick={addSemanticFace}>
-                <Plus size={14} />
-                新增语义面
-              </button>
-            }
+            actions={<>
+              <label className="semantic-face-marker-toggle"><input type="checkbox" checked={showSemanticFaceMarkers} onChange={(event) => setShowSemanticFaceMarkers?.(event.target.checked)} />显示选中语义面 UV</label>
+              <button className="mini-btn" onClick={addSemanticFace}><Plus size={14} />新增语义面</button>
+            </>}
           />
           <div className="semantic-face-responsibilities" role="note">
             <span><strong>来源轮廓边：</strong>决定是哪一个面</span>
             <span><strong>局部坐标系：</strong>决定 U/V 方向</span>
             <span><strong>U/V 边界：</strong>决定面内有效范围</span>
+            <span className="semantic-face-marker-legend"><i className="legend-origin" />截面投影原点 <i className="legend-u" />U <i className="legend-v" />V</span>
           </div>
           {recipe.semanticFaces.map((face, index) => {
             const locator = face.locator ?? null;
@@ -415,7 +424,6 @@ export function GeometryRecipePanel({
                     !draft.sketch.regions.some(
                       (region) =>
                         region.closed &&
-                        region.operation === "add" &&
                         region.boundaryRefs.includes(locator.sourceEntityId),
                     ))
                 : sourceRegion && (!sourceRegion.closed || sourceRegion.operation !== "add")),
@@ -493,6 +501,10 @@ export function GeometryRecipePanel({
             return (
             <div className="semantic-face-row" key={`${face.id}-${index}`}>
               <div className="semantic-face-identity">
+                <div className="semantic-face-actions">
+                  <button className={`mini-btn semantic-face-locate${highlightedSemanticFaceId === face.id ? " active" : ""}`} disabled={!semanticFaceMarkerIds.includes(face.id)} onClick={() => onLocateSemanticFace?.(face.id)}>定位</button>
+                  {!semanticFaceMarkerIds.includes(face.id) && <small className="semantic-face-unresolved">原点不可解析</small>}
+                </div>
                 <Field label="稳定 ID">
                   <input
                     value={face.id}
