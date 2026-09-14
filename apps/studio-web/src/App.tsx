@@ -93,6 +93,8 @@ export default function App() {
     compile,
     compileStatus,
     compileStale,
+    preflight,
+    preflightStale,
     versions,
     materials,
     registry,
@@ -121,6 +123,7 @@ export default function App() {
     archive,
     bindMaterial,
     runCompile,
+    checkPrerequisites,
     publish,
     showError,
     reload,
@@ -188,7 +191,7 @@ export default function App() {
             </p>
           </div>
           <div className="heading-actions">
-            <button className="secondary-btn" disabled={!!busy} onClick={check}>
+            <button className="secondary-btn" disabled={!!busy} onClick={() => void check()}>
               <RefreshCw size={15} />
               阶段检查
             </button>
@@ -281,6 +284,10 @@ export default function App() {
                 draft={draft}
                 compileStatus={compileStatus}
                 compileStale={compileStale}
+                preflight={preflight}
+                preflightStale={preflightStale}
+                checkPrerequisites={checkPrerequisites}
+                openStage={setStage}
               />
             )}
             {stage === "admission" && (
