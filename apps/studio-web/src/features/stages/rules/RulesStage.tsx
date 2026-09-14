@@ -582,18 +582,22 @@ export function RulesStage({
                 ) : (
                   <div className="rule-args">
                     <strong>特征局部尺寸与位置</strong>
-                    <small>字段 x、z 分别是目标语义面局部坐标的 U、V；其余字段是孔径、槽宽或切口尺寸。</small>
+                    <small>字段 x、z 分别是目标语义面局部坐标的 U、V；阵列时，布置轴坐标由阵列规则计算，另一坐标是可编辑的基线位置。</small>
                     {Object.entries(allArguments).map(([key, rawValue]) => {
                       const expression = key in rule.argumentExpressions;
                       const value = String(rawValue);
+                      const arrayMode = rule.placement.mode !== "single";
+                      const automaticArrayMode = ["linearArray", "equalSpan", "maxPitch"].includes(rule.placement.mode);
+                      const axisCoordinate = automaticArrayMode && ((rule.placement.axis === "u" && key === "x") || (rule.placement.axis === "v" && key === "z"));
+                      const label = key === "x" && arrayMode && rule.placement.axis === "v" ? "基线 U (x)" : key === "z" && arrayMode && rule.placement.axis === "u" ? "基线 V (z)" : axisCoordinate ? `${key}（阵列计算）` : key;
                       return (
                         <div className="arg-row" key={key}>
-                          <input value={key} readOnly />
+                          <input value={label} readOnly />
                           <select value={expression ? "expression" : "constant"} onChange={(e) => changeArgumentMode(i, rule, key, value, e.target.value === "expression")}>
                             <option value="constant">常量</option>
                             <option value="expression">表达式</option>
                           </select>
-                          <input list="feature-parameter-options" value={value} onChange={(e) => expression ? edit(i, { argumentExpressions: { ...rule.argumentExpressions, [key]: e.target.value } }) : edit(i, { arguments: { ...rule.arguments, [key]: scalar(e.target.value) } })} />
+                          <input disabled={axisCoordinate} list="feature-parameter-options" value={value} onChange={(e) => expression ? edit(i, { argumentExpressions: { ...rule.argumentExpressions, [key]: e.target.value } }) : edit(i, { arguments: { ...rule.arguments, [key]: scalar(e.target.value) } })} />
                           <button onClick={() => removeArgument(i, rule, key)}><X size={13} /></button>
                         </div>
                       );
