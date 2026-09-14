@@ -1,0 +1,1126 @@
+{
+  "schemaVersion": "3.0",
+  "templateKind": "monolithicPart",
+  "id": "draft-faffad71e7b1",
+  "code": "RW-U-HOLE-IMAGE",
+  "name": "开孔U型零件-图示内外侧壁孔位",
+  "description": "U 型拉伸零件，按参考图在左内壁和右外壁布置贯穿圆孔。",
+  "designIntent": "保持单一连续 U 型实体；左内壁与右外壁通过不同来源轮廓边分别定位，孔位处于同一截面高度并沿长度方向排列。",
+  "manufacturingClassification": {
+    "originId": "inHouse",
+    "primaryProcessId": "coldRollForming",
+    "secondaryProcessIds": [],
+    "reviewed": true
+  },
+  "geometryPrototypeId": "prototype.customRecipe",
+  "tags": [
+    "U型",
+    "开孔",
+    "几何语义面"
+  ],
+  "owner": "RuiWare示例",
+  "organization": "几何语义面验证",
+  "unitSystem": "mm-kg-s",
+  "coordinateSystem": "right-handed-z-up",
+  "lifecycleStatus": "draft",
+  "stageStatus": {
+    "templateInfo": "complete",
+    "material": "complete",
+    "baseSketch": "complete",
+    "features": "complete",
+    "variants": "complete",
+    "review": "complete",
+    "admission": "not_started"
+  },
+  "attachments": [],
+  "materialRequirements": [
+    {
+      "id": "material.main",
+      "selectionMode": "category",
+      "supplyForm": "coil",
+      "familyTags": [],
+      "allowedGrades": [],
+      "standards": [],
+      "surfaces": [],
+      "thickness": {
+        "parameterId": "thickness",
+        "allowedValues": [],
+        "minimum": null,
+        "maximum": null
+      },
+      "requiredProperties": {},
+      "allowInstanceSubstitution": true,
+      "specificBindingId": null,
+      "reviewed": true
+    }
+  ],
+  "materialValidationSamples": [
+    {
+      "id": "material.nominal",
+      "role": "nominal",
+      "name": "标称样例",
+      "bindingId": "mat-bfe035aff0ed",
+      "bindingMode": "reference",
+      "materialCode": "COIL-Q345-2",
+      "materialName": "Q345冷轧卷材",
+      "materialThickness": 2.0,
+      "variantId": "nominal",
+      "requiredForAdmission": true,
+      "reviewed": true
+    }
+  ],
+  "blank": {
+    "form": "strip",
+    "preparationMode": "preparedBlank",
+    "preparationProcesses": [
+      "uncoiling",
+      "slitting"
+    ],
+    "manufacturingRoute": "coldRollForming",
+    "lengthExpression": "length",
+    "widthExpression": "sectionWidth",
+    "thicknessExpression": "thickness",
+    "lengthAllowance": 0.0,
+    "widthAllowance": 0.0,
+    "grainDirection": "longitudinal"
+  },
+  "sketch": {
+    "model": "semanticProfile",
+    "acquisitionMethod": "manual",
+    "plane": "XY",
+    "profileMode": "closedRegion",
+    "drivingParameters": [
+      "sectionWidth",
+      "sectionHeight"
+    ],
+    "entities": [
+      {
+        "id": "edge.u.bottom.outer",
+        "role": "section.edge.u.bottom.outer",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -50.0,
+          -30.0
+        ],
+        "end": [
+          50.0,
+          -30.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.u.right.outer",
+        "role": "section.edge.u.right.outer",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          50.0,
+          -30.0
+        ],
+        "end": [
+          50.0,
+          30.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.u.right.inner",
+        "role": "section.edge.u.right.inner",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          50.0,
+          30.0
+        ],
+        "end": [
+          30.0,
+          30.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.u.right.wall.inner",
+        "role": "section.edge.u.right.wall.inner",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          30.0,
+          30.0
+        ],
+        "end": [
+          30.0,
+          -10.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.u.web.inner",
+        "role": "section.edge.u.web.inner",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          30.0,
+          -10.0
+        ],
+        "end": [
+          -30.0,
+          -10.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.u.left.wall.inner",
+        "role": "section.edge.u.left.wall.inner",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -30.0,
+          -10.0
+        ],
+        "end": [
+          -30.0,
+          30.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.u.left.inner",
+        "role": "section.edge.u.left.inner",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -30.0,
+          30.0
+        ],
+        "end": [
+          -50.0,
+          30.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      },
+      {
+        "id": "edge.u.left.outer",
+        "role": "section.edge.u.left.outer",
+        "geometryType": "line",
+        "parameterRefs": [],
+        "construction": false,
+        "start": [
+          -50.0,
+          30.0
+        ],
+        "end": [
+          -50.0,
+          -30.0
+        ],
+        "center": null,
+        "radius": null,
+        "startAngle": null,
+        "endAngle": null,
+        "largeArc": null,
+        "points": []
+      }
+    ],
+    "constraints": [
+      {
+        "id": "constraint.u.fixed.1",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.bottom.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.horizontal.1",
+        "label": "U型截面方向",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "edge.u.bottom.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.1",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.bottom.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 100.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.fixed.2",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.right.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.vertical.2",
+        "label": "U型截面方向",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.u.right.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.2",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.right.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 60.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.fixed.3",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.right.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.horizontal.3",
+        "label": "U型截面方向",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "edge.u.right.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.3",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.right.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 20.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.fixed.4",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.right.wall.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.vertical.4",
+        "label": "U型截面方向",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.u.right.wall.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.4",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.right.wall.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 40.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.fixed.5",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.web.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.horizontal.5",
+        "label": "U型截面方向",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "edge.u.web.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.5",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.web.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 60.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.fixed.6",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.left.wall.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.vertical.6",
+        "label": "U型截面方向",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.u.left.wall.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.6",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.left.wall.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 40.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.fixed.7",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.left.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.horizontal.7",
+        "label": "U型截面方向",
+        "constraintType": "horizontal",
+        "entityRefs": [
+          "edge.u.left.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.7",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.left.inner"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 20.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.fixed.8",
+        "label": "U型截面锚定",
+        "constraintType": "fixed",
+        "entityRefs": [
+          "edge.u.left.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.vertical.8",
+        "label": "U型截面方向",
+        "constraintType": "vertical",
+        "entityRefs": [
+          "edge.u.left.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": null,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      },
+      {
+        "id": "constraint.u.length.8",
+        "label": "U型截面长度",
+        "constraintType": "distance",
+        "entityRefs": [
+          "edge.u.left.outer"
+        ],
+        "endpointRefs": [],
+        "expression": null,
+        "parameterId": null,
+        "value": 60.0,
+        "driverMode": null,
+        "enabled": true,
+        "driving": true
+      }
+    ],
+    "regions": [
+      {
+        "id": "section.region.u",
+        "boundaryRefs": [
+          "edge.u.bottom.outer",
+          "edge.u.right.outer",
+          "edge.u.right.inner",
+          "edge.u.right.wall.inner",
+          "edge.u.web.inner",
+          "edge.u.left.wall.inner",
+          "edge.u.left.inner",
+          "edge.u.left.outer"
+        ],
+        "closed": true,
+        "role": "section.materialRegion",
+        "operation": "add"
+      }
+    ],
+    "constraintsReviewed": true,
+    "sourceAttachmentId": null,
+    "sourceProfileId": null,
+    "sourceHash": null,
+    "importUnit": null,
+    "importScale": null,
+    "conversionReviewed": false
+  },
+  "sweepPath": null,
+  "parameterDefinitions": [
+    {
+      "id": "length",
+      "label": "长度",
+      "displayName": "长度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 50.0,
+      "maximum": 500.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "sectionWidth",
+      "label": "截面宽度",
+      "displayName": "截面宽度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 100.0,
+      "maximum": 100.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "sectionHeight",
+      "label": "截面高度",
+      "displayName": "截面高度",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 60.0,
+      "minimum": 60.0,
+      "maximum": 60.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": null
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "thickness",
+      "label": "壁厚",
+      "displayName": "壁厚",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 2.0,
+      "minimum": null,
+      "maximum": null,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "material",
+      "sourceDefinition": {
+        "type": "materialProperty",
+        "reference": "material.thickness",
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 2.0
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": ""
+    },
+    {
+      "id": "holes_u_image_pitch",
+      "label": "图示左内壁与右外壁圆孔间距",
+      "displayName": "图示左内壁与右外壁圆孔间距",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 0.0,
+      "maximum": 10000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 100.0
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": true,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": "规则页预声明，进入契约页后补全来源、作用域与发布要求。"
+    },
+    {
+      "id": "holes_u_image_pitch_2",
+      "label": "图示左内壁与右外壁圆孔间距",
+      "displayName": "图示左内壁与右外壁圆孔间距",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 0.0,
+      "maximum": 10000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 100.0
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": true,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": "规则页预声明，进入契约页后补全来源、作用域与发布要求。"
+    },
+    {
+      "id": "holes_u_image_pitch_3",
+      "label": "图示左内壁与右外壁圆孔间距",
+      "displayName": "图示左内壁与右外壁圆孔间距",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 0.0,
+      "minimum": 0.0,
+      "maximum": 100.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 0.0
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": true,
+      "contractReady": true,
+      "ruleDefaultFor": null,
+      "description": "规则页预声明，进入契约页后补全来源、作用域与发布要求。"
+    },
+    {
+      "id": "holeDiameter",
+      "label": "孔径",
+      "displayName": "孔径",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 12.0,
+      "minimum": 0.0,
+      "maximum": 10000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 12.0
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": "ruleDefault:feature.mtzfgo0p:holeDiameter",
+      "description": "由规则“新制造规则”自动生成的孔径。"
+    },
+    {
+      "id": "holePitch",
+      "label": "孔间距",
+      "displayName": "孔间距",
+      "aliases": [],
+      "symbol": null,
+      "valueType": "number",
+      "unit": "mm",
+      "default": 100.0,
+      "minimum": 0.0,
+      "maximum": 10000.0,
+      "allowedValues": [],
+      "exposed": true,
+      "source": "user",
+      "sourceDefinition": {
+        "type": "userInput",
+        "reference": null,
+        "expression": null,
+        "dependencies": [],
+        "lookupTable": {},
+        "fallback": 100.0
+      },
+      "scope": "partInstance",
+      "declaredInRuleStage": false,
+      "contractReady": true,
+      "ruleDefaultFor": "ruleDefault:feature.mtzfgo0p:holePitch",
+      "description": "由规则“新制造规则”自动生成的孔间距。"
+    }
+  ],
+  "variants": [
+    {
+      "id": "nominal",
+      "name": "标称实例",
+      "kind": "standard",
+      "overrides": {},
+      "expected": "valid",
+      "requiredForAdmission": false,
+      "purpose": ""
+    }
+  ],
+  "geometryRecipe": {
+    "id": "geometry.main",
+    "constructionMode": "extrude",
+    "sketches": [
+      "sketch.section.main"
+    ],
+    "paths": [],
+    "operations": [
+      {
+        "id": "body.main",
+        "operator": "profile.open_profile_tube_extrude",
+        "sourceRefs": [
+          "sketch.section.main"
+        ],
+        "arguments": {},
+        "argumentExpressions": {
+          "length": "length"
+        },
+        "conditionExpression": "True",
+        "semanticOutputs": [
+          "part.body",
+          "part.endFace.start",
+          "part.endFace.end"
+        ],
+        "pathSketchId": null,
+        "profileSketchId": "sketch.section.main",
+        "profileAnchor": "sketch.origin",
+        "orientationMode": "minimumTwist",
+        "scaleMode": "constant",
+        "twistMode": "none",
+        "cornerMode": "right"
+      }
+    ],
+    "semanticFaces": [
+      {
+        "id": "part.face.u.left.inner",
+        "label": "U型左侧内壁（图示孔位）",
+        "hostFrame": "positiveY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "edge.u.left.inner",
+          "capSide": null
+        },
+        "uStartExpression": "-10",
+        "uSpanExpression": "40",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.face.u.right.outer",
+        "label": "U型右侧外壁（图示孔位）",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "edge.u.right.outer",
+          "capSide": null
+        },
+        "uStartExpression": "-30",
+        "uSpanExpression": "60",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      },
+      {
+        "id": "part.endFace.start",
+        "label": "U型起始端面",
+        "hostFrame": "negativeZ",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileRegion",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "section.region.u",
+          "capSide": "start"
+        },
+        "uStartExpression": "-50",
+        "uSpanExpression": "100",
+        "vStartExpression": "-30",
+        "vSpanExpression": "60"
+      },
+      {
+        "id": "part.endFace.end",
+        "label": "U型终止端面",
+        "hostFrame": "positiveZ",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileRegion",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "section.region.u",
+          "capSide": "end"
+        },
+        "uStartExpression": "-50",
+        "uSpanExpression": "100",
+        "vStartExpression": "-30",
+        "vSpanExpression": "60"
+      },
+      {
+        "id": "part.face.mttori77",
+        "label": "底部轮廓边",
+        "hostFrame": "negativeY",
+        "sourceOperationId": "body.main",
+        "locator": {
+          "kind": "profileEdge",
+          "operationId": "body.main",
+          "profileSketchId": "sketch.section.main",
+          "sourceEntityId": "edge.u.bottom.outer",
+          "capSide": null
+        },
+        "uStartExpression": "-sectionWidth / 2",
+        "uSpanExpression": "sectionWidth",
+        "vStartExpression": "0",
+        "vSpanExpression": "length"
+      }
+    ],
+    "reviewed": true
+  },
+  "featureRules": [
+    {
+      "id": "holes.u.image",
+      "name": "图示左内壁与右外壁圆孔",
+      "featureType": "circularHole",
+      "enabled": true,
+      "conditionExpression": "True",
+      "countExpression": "3",
+      "indexVariable": "i",
+      "arguments": {
+        "diameter": 8,
+        "x": 10,
+        "z": 20
+      },
+      "argumentExpressions": {},
+      "faceBindings": [
+        {
+          "semanticFaceId": "part.face.u.left.inner"
+        },
+        {
+          "semanticFaceId": "part.face.u.right.outer"
+        }
+      ],
+      "profileDimensions": [],
+      "placement": {
+        "mode": "linearArray",
+        "axis": "v",
+        "pitchExpression": "10",
+        "startMarginExpression": "20",
+        "endMarginExpression": "0",
+        "maximumPitchExpression": "300"
+      },
+      "polygonVertices": [],
+      "maximumCount": 2000,
+      "semanticGroup": null,
+      "description": "按参考图在 U 型左侧内壁与右侧外壁的同一截面高度各布置三枚贯穿圆孔。"
+    },
+    {
+      "id": "feature.mtzfgo0p",
+      "name": "新制造规则",
+      "featureType": "circularHole",
+      "enabled": true,
+      "conditionExpression": "True",
+      "countExpression": "3",
+      "indexVariable": "i",
+      "arguments": {
+        "x": 8
+      },
+      "argumentExpressions": {
+        "z": "10",
+        "diameter": "20"
+      },
+      "faceBindings": [
+        {
+          "semanticFaceId": "part.face.mttori77"
+        }
+      ],
+      "profileDimensions": [],
+      "placement": {
+        "mode": "linearArray",
+        "axis": "v",
+        "pitchExpression": "10",
+        "startMarginExpression": "20",
+        "endMarginExpression": "0",
+        "maximumPitchExpression": "300"
+      },
+      "polygonVertices": [],
+      "maximumCount": 200,
+      "semanticGroup": null,
+      "description": ""
+    }
+  ],
+  "featureRulesReviewed": true,
+  "interfaces": [],
+  "evidence": [],
+  "aiProposals": [],
+  "admission": {
+    "changeNote": "",
+    "reviewer": "",
+    "releaseChannel": "development"
+  },
+  "revision": 61,
+  "createdAt": "2026-09-09T10:15:04.091762+08:00",
+  "updatedAt": "2026-09-13T15:12:05.157105+08:00"
+}

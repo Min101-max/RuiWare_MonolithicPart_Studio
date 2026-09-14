@@ -38,6 +38,12 @@ import { SketchWorkspaceStatusBar } from "./panels/workspace/SketchWorkspaceStat
 import { SketchModePanel } from "./panels/workspace/SketchModePanel";
 import { GeometryAuthoringPanel } from "./panels/workspace/GeometryAuthoringPanel";
 import { GeometryRecipePanel } from "./panels/workspace/GeometryRecipePanel";
+import {
+  filterSemanticFaceMarkers,
+  regionsForSelectedEntities,
+  semanticFaceMarkers,
+  type SemanticFaceSelection,
+} from "./semanticFaceMarkers";
 import { SketchIntentEditor } from "./panels/intent/SketchIntentEditor";
 import { SketchSelectedEntityEditor } from "./panels/constraints/SketchSelectedEntityEditor";
 import { useGeometryEditFlow } from "./hooks/useGeometryEditFlow";
@@ -256,6 +262,87 @@ export function GeometryStage({
   >(null);
   const [pathWindowState, setPathWindowState] = useState<SweepPathWindowState>("pathWindowClosed");
   const [moveMode, setMoveMode] = useState(false);
+  const [showSemanticFaceMarkers, setShowSemanticFaceMarkers] = useState(true);
+  const [highlightedSemanticFaceId, setHighlightedSemanticFaceId] = useState<string | null>(null);
+  const [semanticSelection, setSemanticSelection] = useState<SemanticFaceSelection>(null);
+  const [semanticFaceLocateOverride, setSemanticFaceLocateOverride] = useState<string | null>(null);
+  const clearSemanticFaceState = useCallback(() => {
+    setSemanticSelection(null);
+    setSemanticFaceLocateOverride(null);
+    setHighlightedSemanticFaceId(null);
+  }, []);
+  const faceMarkers = useMemo(() => semanticFaceMarkers(draft), [draft]);
+  const semanticFaceMarkerIds = useMemo(() => faceMarkers.map((marker) => marker.id), [faceMarkers]);
+  const visibleFaceMarkers = useMemo(() => {
+    if (!showSemanticFaceMarkers || solveCase !== "nominal") return [];
+    if (semanticFaceLocateOverride) {
+      return faceMarkers.filter((marker) => marker.id === semanticFaceLocateOverride);
+    }
+    return filterSemanticFaceMarkers(faceMarkers, semanticSelection);
+  }, [faceMarkers, semanticFaceLocateOverride, semanticSelection, showSemanticFaceMarkers, solveCase]);
+  const handleSemanticSelectionChange = useCallback((selection: SemanticFaceSelection) => {
+    setSemanticSelection(selection);
+    setSemanticFaceLocateOverride(null);
+    setHighlightedSemanticFaceId(null);
+  }, []);
+  const locateSemanticFace = (faceId: string) => {
+    if (!showSemanticFaceMarkers) setShowSemanticFaceMarkers(true);
+    const locatingFromAnotherCase = solveCase !== "nominal";
+    if (locatingFromAnotherCase) setSolveCase("nominal");
+    setSemanticFaceLocateOverride((current) =>
+      locatingFromAnotherCase || current !== faceId ? faceId : null,
+    );
+    setHighlightedSemanticFaceId((current) =>
+      locatingFromAnotherCase || current !== faceId ? faceId : null,
+    );
+    requestAnimationFrame(() => {
+      const canvas = document.querySelector<SVGSVGElement>("[data-semantic-face-canvas]");
+      canvas?.scrollIntoView({ behavior: "smooth", block: "center" });
+      canvas?.focus({ preventScroll: true });
+    });
+  };
+  useEffect(() => {
+    if (highlightedSemanticFaceId && !semanticFaceMarkerIds.includes(highlightedSemanticFaceId)) {
+      setHighlightedSemanticFaceId(null);
+    }
+    if (semanticFaceLocateOverride && !semanticFaceMarkerIds.includes(semanticFaceLocateOverride)) {
+      setSemanticFaceLocateOverride(null);
+    }
+  }, [highlightedSemanticFaceId, semanticFaceLocateOverride, semanticFaceMarkerIds]);
+  useEffect(() => {
+    if (solveCase !== "nominal") {
+      setSemanticFaceLocateOverride(null);
+      setHighlightedSemanticFaceId(null);
+    }
+  }, [solveCase]);
+  useEffect(() => {
+    if (!semanticSelection || semanticFaceLocateOverride) return;
+    if (!selectedEntities.length) {
+      clearSemanticFaceState();
+      return;
+    }
+    const selectedIds = new Set(selectedEntities);
+    if (semanticSelection.kind === "edge") {
+      const validIds = semanticSelection.sourceEntityIds.filter((id) =>
+        selectedIds.has(id) && draft.sketch.entities.some((entity) => entity.id === id),
+      );
+      if (validIds.length === semanticSelection.sourceEntityIds.length) return;
+      if (validIds.length) {
+        setSemanticSelection({ kind: "edge", sourceEntityIds: validIds });
+      } else {
+        clearSemanticFaceState();
+      }
+      return;
+    }
+    const selectedRegions = new Set(regionsForSelectedEntities(draft, selectedEntities));
+    const validRegionIds = semanticSelection.sourceRegionIds.filter((id) => selectedRegions.has(id));
+    if (validRegionIds.length === semanticSelection.sourceRegionIds.length) return;
+    if (validRegionIds.length) {
+      setSemanticSelection({ kind: "region", sourceRegionIds: validRegionIds });
+    } else {
+      clearSemanticFaceState();
+    }
+  }, [clearSemanticFaceState, draft, selectedEntities, semanticFaceLocateOverride, semanticSelection]);
   const committedSweepPath = draft.sweepPath || createEmptySweepPath();
   const sweepPathLabel = committedSweepPath.status === "confirmed"
     ? "路径已定义"
@@ -448,6 +535,7 @@ export function GeometryStage({
       },
     });
     setSelectedEntities([]);
+    clearSemanticFaceState();
     setPendingProfileMode(null);
   };
   const editEntity = (
@@ -506,11 +594,40 @@ export function GeometryStage({
     setSelectedEntities((items) =>
       items.map((item) => (item === oldId ? nextId : item)),
     );
+    setSemanticSelection((selection) =>
+      selection?.kind === "edge"
+        ? {
+            kind: "edge",
+            sourceEntityIds: selection.sourceEntityIds.map((id) =>
+              id === oldId ? nextId : id,
+            ),
+          }
+        : selection,
+    );
     return true;
   };
   const selected = draft.sketch.entities.find(
     (item) => item.id === selectedEntity,
   );
+  const selectEntityFromPanel = useCallback((id: string | string[], additive = false) => {
+    const incoming = (Array.isArray(id) ? id : [id]).filter(Boolean);
+    const nextIds = additive
+      ? Array.isArray(id)
+        ? [...new Set([...selectedEntities, ...incoming])]
+        : selectedEntities.includes(id)
+          ? selectedEntities.filter((item) => item !== id)
+          : [...selectedEntities, id]
+      : incoming;
+    selectEntity(id, additive);
+    const regionIds = regionsForSelectedEntities(draft, nextIds);
+    handleSemanticSelectionChange(
+      regionIds.length
+        ? { kind: "region", sourceRegionIds: regionIds }
+        : nextIds.length
+          ? { kind: "edge", sourceEntityIds: nextIds }
+          : null,
+    );
+  }, [draft, handleSemanticSelectionChange, selectEntity, selectedEntities]);
   const planeAxes = sketchPlaneAxes(draft.sketch.plane);
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -537,6 +654,26 @@ export function GeometryStage({
       ) {
         event.preventDefault();
         pasteClipboardEntities();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "a"
+      ) {
+        event.preventDefault();
+        const ids = draft.sketch.entities
+          .filter((entity) => !entity.construction && entity.geometryType !== "point")
+          .map((entity) => entity.id);
+        setSelectedEntities(ids);
+        const regionIds = regionsForSelectedEntities(draft, ids);
+        setSemanticSelection(
+          regionIds.length
+            ? { kind: "region", sourceRegionIds: regionIds }
+            : ids.length
+              ? { kind: "edge", sourceEntityIds: ids }
+              : null,
+        );
+        setSemanticFaceLocateOverride(null);
+        setHighlightedSemanticFaceId(null);
       } else if (
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
@@ -568,6 +705,7 @@ export function GeometryStage({
           return;
         }
         setSelectedEntities([]);
+        clearSemanticFaceState();
         setTool("select");
       }
     };
@@ -582,6 +720,8 @@ export function GeometryStage({
     sketchEditConflict,
     sketchClipboard,
     tool,
+    setSelectedEntities,
+    clearSemanticFaceState,
   ]);
   return (
     <>
@@ -660,6 +800,10 @@ export function GeometryStage({
               objectSnapEnabled={objectSnapEnabled}
               arcDrawMode={arcDrawMode}
               moveMode={moveMode}
+              semanticFaceMarkers={visibleFaceMarkers}
+              highlightedSemanticFaceId={highlightedSemanticFaceId}
+              onSemanticSelectionChange={handleSemanticSelectionChange}
+              dataSemanticFaceCanvas
             />
             <SketchWorkspaceStatusBar
               solution={solution}
@@ -702,7 +846,7 @@ export function GeometryStage({
         draft={draft}
         solution={solution}
         selected={selectedEntities}
-        onSelect={selectEntity}
+        onSelect={selectEntityFromPanel}
         setSketch={setSketch}
         change={change}
       />
@@ -720,6 +864,11 @@ export function GeometryStage({
         operators={OPERATORS}
         operatorStatus={operatorStatus}
         operatorDefaults={operatorDefaults}
+        showSemanticFaceMarkers={showSemanticFaceMarkers}
+        setShowSemanticFaceMarkers={setShowSemanticFaceMarkers}
+        highlightedSemanticFaceId={highlightedSemanticFaceId}
+        semanticFaceMarkerIds={semanticFaceMarkerIds}
+        onLocateSemanticFace={locateSemanticFace}
       />
       {pathWindowState !== "pathWindowClosed" && (
         <SweepPathDialog

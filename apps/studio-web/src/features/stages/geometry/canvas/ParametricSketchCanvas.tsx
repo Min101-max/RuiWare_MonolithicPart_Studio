@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   CircleAlert,
@@ -12,6 +12,12 @@ import {
   ZoomOut,
 } from "lucide-react";
 import type { Draft, ParameterDefinition, SketchSolveResult } from "../../../../types";
+import {
+  regionsForSelectedEntities,
+  semanticFaceMarkers as buildSemanticFaceMarkers,
+  type SemanticFaceMarker,
+  type SemanticFaceSelection,
+} from "../semanticFaceMarkers";
 import {
   buildEndToEndJoints,
   cloneSketchEntities,
@@ -139,6 +145,10 @@ export function ParametricSketchCanvas({
   objectSnapEnabled,
   arcDrawMode,
   moveMode = false,
+  semanticFaceMarkers = [],
+  highlightedSemanticFaceId,
+  onSemanticSelectionChange,
+  dataSemanticFaceCanvas = false,
 }: {
   draft: Draft;
   solution: SketchSolveResult | null;
@@ -166,6 +176,10 @@ export function ParametricSketchCanvas({
   objectSnapEnabled: boolean;
   arcDrawMode: ArcDrawMode;
   moveMode?: boolean;
+  semanticFaceMarkers?: SemanticFaceMarker[];
+  highlightedSemanticFaceId?: string | null;
+  onSemanticSelectionChange?: (selection: SemanticFaceSelection) => void;
+  dataSemanticFaceCanvas?: boolean;
 }) {
   const solved = solution?.cases.find((entry) => entry.case === caseName);
   const draftPrimitives = entitiesToPrimitives(draft.sketch.entities);
@@ -287,6 +301,7 @@ export function ParametricSketchCanvas({
     ReturnType<typeof entitiesToPrimitives> | null
   >(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const markerInstanceId = useId().replace(/:/g, "-");
   const viewMathRef = useRef({ scale: 1, cx: 0, cy: 0, viewportKey: "" });
   const panRef = useRef<{
     pointerId: number;
@@ -311,6 +326,38 @@ export function ParametricSketchCanvas({
   const dragRef = useRef<typeof drag>(null);
   const connectionPreviewRef = useRef<EndpointConnectionCandidate | null>(null);
   dragRef.current = drag;
+  const emitSemanticSelection = (selection: SemanticFaceSelection) => {
+    onSemanticSelectionChange?.(selection);
+  };
+  const emitEdgeSelection = (entityId: string, additive = false) => {
+    if (!entityId) {
+      emitSemanticSelection(null);
+      return;
+    }
+    const ids = additive
+      ? selected.includes(entityId)
+        ? selected.filter((id) => id !== entityId)
+        : [...selected, entityId]
+      : [entityId];
+    emitSemanticSelection(
+      ids.length ? { kind: "edge", sourceEntityIds: ids } : null,
+    );
+  };
+  const emitSelectionForEntityIds = (entityIds: string[]) => {
+    const ids = [...new Set(entityIds.filter(Boolean))];
+    const regionIds = regionsForSelectedEntities(draft, ids);
+    if (regionIds.length) {
+      emitSemanticSelection({ kind: "region", sourceRegionIds: regionIds });
+      return;
+    }
+    const edgeIds = ids.filter((id) => {
+      const entity = draft.sketch.entities.find((item) => item.id === id);
+      return !!entity && !entity.construction && entity.geometryType !== "point";
+    });
+    emitSemanticSelection(
+      edgeIds.length ? { kind: "edge", sourceEntityIds: edgeIds } : null,
+    );
+  };
   void dragTick;
   const conflictPrimitives = pendingConflict
     ? entitiesToPrimitives(pendingConflict.afterEntities)
@@ -446,6 +493,24 @@ export function ParametricSketchCanvas({
     }
     setViewRevision((value) => value + 1);
   }, [viewCommand?.id]);
+  useEffect(() => {
+    if (!highlightedSemanticFaceId) return;
+    const marker = semanticFaceMarkers.find((item) => item.id === highlightedSemanticFaceId);
+    if (!marker) return;
+    const current = viewport.current.bounds;
+    const spanX = Math.max(20, current.maximumX - current.minimumX);
+    const spanY = Math.max(20, current.maximumY - current.minimumY);
+    viewport.current = {
+      key: viewportKey,
+      bounds: {
+        minimumX: marker.origin.x - spanX / 2,
+        maximumX: marker.origin.x + spanX / 2,
+        minimumY: marker.origin.y - spanY / 2,
+        maximumY: marker.origin.y + spanY / 2,
+      },
+    };
+    setViewRevision((value) => value + 1);
+  }, [highlightedSemanticFaceId, semanticFaceMarkers, viewportKey, viewport]);
   void viewRevision;
   const bounds = viewport.current.bounds;
   const spanX = Math.max(20, bounds.maximumX - bounds.minimumX),
@@ -458,6 +523,56 @@ export function ParametricSketchCanvas({
     x: cx + point.x * scale,
     y: cy - point.y * scale,
   });
+  const visibleMarkerIds = new Set(semanticFaceMarkers.map((marker) => marker.id));
+  const displaySemanticFaceMarkers = pendingConflict
+    ? []
+    : drag
+    ? buildSemanticFaceMarkers({
+        ...draft,
+        sketch: { ...draft.sketch, entities: editDisplayEntities },
+      }).filter((marker) => visibleMarkerIds.has(marker.id))
+    : semanticFaceMarkers;
+  const semanticFaceArrowPrefix = `semanticFaceArrow-${(draft.id || "draft").replace(/[^a-zA-Z0-9_-]/g, "-")}-${markerInstanceId}`;
+  const semanticFaceArrowUId = `${semanticFaceArrowPrefix}-u`;
+  const semanticFaceArrowVId = `${semanticFaceArrowPrefix}-v`;
+  const markerRows = new Map<string, number>();
+  const markerAxisOwners = new Map<string, string>();
+  for (const marker of displaySemanticFaceMarkers) {
+    const key = [
+      marker.origin.x.toFixed(6),
+      marker.origin.y.toFixed(6),
+      marker.u?.x ?? "",
+      marker.u?.y ?? "",
+      marker.v?.x ?? "",
+      marker.v?.y ?? "",
+      marker.outOfPlane ?? "",
+    ].join("|");
+    const owner = markerAxisOwners.get(key);
+    if (!owner || marker.id === highlightedSemanticFaceId) {
+      markerAxisOwners.set(key, marker.id);
+    }
+  }
+  const laidOutSemanticFaceMarkers = displaySemanticFaceMarkers
+    .map((marker) => {
+      const key = `${marker.origin.x.toFixed(6)},${marker.origin.y.toFixed(6)}`;
+      const labelRow = markerRows.get(key) ?? 0;
+      markerRows.set(key, labelRow + 1);
+      const axisKey = [
+        marker.origin.x.toFixed(6),
+        marker.origin.y.toFixed(6),
+        marker.u?.x ?? "",
+        marker.u?.y ?? "",
+        marker.v?.x ?? "",
+        marker.v?.y ?? "",
+        marker.outOfPlane ?? "",
+      ].join("|");
+      return {
+        marker,
+        labelRow,
+        drawAxes: markerAxisOwners.get(axisKey) === marker.id,
+      };
+    })
+    .sort((a, b) => Number(a.marker.id === highlightedSemanticFaceId) - Number(b.marker.id === highlightedSemanticFaceId));
   const activeEntityEditHint =
     drag?.hasMoved && drag.editTarget
       ? sketchEntityEditHint(editDisplayEntities, drag.editTarget)
@@ -910,8 +1025,14 @@ export function ParametricSketchCanvas({
         event.target instanceof SVGRectElement
       )
         onSelect("");
+      if (
+        event.target === event.currentTarget ||
+        event.target instanceof SVGRectElement
+      )
+        emitSemanticSelection(null);
       return;
     }
+    emitSemanticSelection(null);
     if (tool === "polyline" && event.detail > 1) return;
     const pointerWorld = world(event);
     const linePreview =
@@ -1271,11 +1392,17 @@ export function ParametricSketchCanvas({
       event.pointerId,
     );
     if (!active.hasMoved) return;
+    const nextSelected = active.subtractive && !active.additive
+      ? selected.filter((id) => !ids.includes(id))
+      : active.additive
+        ? [...new Set([...selected, ...ids])]
+        : ids;
     if (active.subtractive && !active.additive) {
       onSelect(selected.filter((id) => !ids.includes(id)));
     } else {
       onSelect(ids, active.additive);
     }
+    emitSelectionForEntityIds(nextSelected);
     event.preventDefault();
   };
   const startPan = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -2059,6 +2186,7 @@ export function ParametricSketchCanvas({
       click(event);
     } else if (activePan.button === 0 && activePan.startedOnBackground) {
       onSelect("");
+      emitSemanticSelection(null);
     }
   };
   const cancelPointer = (event: React.PointerEvent<SVGSVGElement>) => {
@@ -2078,6 +2206,7 @@ export function ParametricSketchCanvas({
   useEffect(() => {
     if (activeToolRef.current === tool) return;
     activeToolRef.current = tool;
+    emitSemanticSelection(null);
     cancelEntityDrag();
     cancelBoxSelection();
     cancelCanvasPan(true);
@@ -2089,7 +2218,9 @@ export function ParametricSketchCanvas({
       cancelCanvasPan(true);
     };
     const cancelOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !pointerOperationRef.current) return;
+      if (event.key !== "Escape") return;
+      emitSemanticSelection(null);
+      if (!pointerOperationRef.current) return;
       event.preventDefault();
       event.stopImmediatePropagation();
       cancelActiveOperation();
@@ -2139,6 +2270,10 @@ export function ParametricSketchCanvas({
       return;
     }
     event.stopPropagation();
+    // Keep semantic UV intent tied to the actually hit edge. Rectangle editing
+    // may expand the normal selection to all four edges, but must not turn a
+    // direct edge click into a region/cap selection.
+    emitEdgeSelection(entityId, event.shiftKey || event.ctrlKey);
     const rectangle = findSketchRectangleGroup(editDisplayEntities, entityId);
     if (rectangle && handle === "body") {
       if (event.shiftKey || event.ctrlKey) {
@@ -2164,6 +2299,16 @@ export function ParametricSketchCanvas({
   ) => {
     if (event.button !== 0 || moveMode) return;
     event.stopPropagation();
+    const semanticEntityId = control.editTarget?.kind === "rectangle-edge"
+      ? control.editTarget.entityIds[control.editTarget.edgeIndex]
+      : control.editTarget?.kind === "rectangle-corner"
+        ? null
+        : control.entityId;
+    if (semanticEntityId) {
+      emitEdgeSelection(semanticEntityId, event.shiftKey || event.ctrlKey);
+    } else {
+      emitSemanticSelection(null);
+    }
     if (control.editTarget) {
       const handle =
         control.editTarget.kind === "arc-start"
@@ -2348,6 +2493,8 @@ export function ParametricSketchCanvas({
   return (
     <svg
       ref={svgRef}
+      tabIndex={-1}
+      data-semantic-face-canvas={dataSemanticFaceCanvas ? "true" : undefined}
       className={`semantic-sketch-canvas tool-${tool}${
         isPanning ? " panning" : ""
       }${drag ? ` ${drag.operationKind}` : ""}${
@@ -2388,6 +2535,12 @@ export function ParametricSketchCanvas({
       }}
     >
       <defs>
+        <marker id={semanticFaceArrowUId} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+        </marker>
+        <marker id={semanticFaceArrowVId} viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a" />
+        </marker>
         <pattern
           id="solverGrid"
           width="20"
@@ -2408,15 +2561,60 @@ export function ParametricSketchCanvas({
         fill="url(#solverGrid)"
         data-sketch-canvas-background="true"
       />
-      <line x1="0" y1={cy} x2="460" y2={cy} className="solver-axis" />
-      <line x1={cx} y1="0" x2={cx} y2="330" className="solver-axis" />
-      <text x="444" y={Math.max(14, cy - 7)} className="axis-label">
+      <line x1="0" y1={cy} x2="460" y2={cy} className="solver-axis" pointerEvents="none" />
+      <line x1={cx} y1="0" x2={cx} y2="330" className="solver-axis" pointerEvents="none" />
+      <text x="444" y={Math.max(14, cy - 7)} className="axis-label" pointerEvents="none">
         {sketchPlaneAxes(draft.sketch.plane).horizontal}
       </text>
-      <text x={Math.min(444, cx + 7)} y="15" className="axis-label">
+      <text x={Math.min(444, cx + 7)} y="15" className="axis-label" pointerEvents="none">
         {sketchPlaneAxes(draft.sketch.plane).vertical}
       </text>
       {primitives.map(drawPrimitive)}
+      {laidOutSemanticFaceMarkers.map(({ marker, labelRow, drawAxes }) => {
+        const point = screen(marker.origin);
+        const size = Math.max(12, Math.min(26, scale * 8));
+        const active = marker.id === highlightedSemanticFaceId;
+        const sourceStart = marker.sourceSegment
+          ? screen(marker.sourceSegment.start)
+          : null;
+        const sourceEnd = marker.sourceSegment
+          ? screen(marker.sourceSegment.end)
+          : null;
+        return (
+          <g key={marker.id} className={`semantic-face-marker${active ? " active" : ""}`} pointerEvents="none">
+            <title>
+              {marker.locatorKind === "profileEdge"
+                ? `${marker.label}：截面投影原点；拉伸法向深度在二维画布中不可见`
+                : `${marker.label}：${marker.capSide === "end" ? "终止" : "起始"}端面投影原点`}
+            </title>
+            {drawAxes && sourceStart && sourceEnd && (
+              <line
+                className="semantic-face-marker-source"
+                x1={sourceStart.x}
+                y1={sourceStart.y}
+                x2={sourceEnd.x}
+                y2={sourceEnd.y}
+              />
+            )}
+            {drawAxes && (
+              <>
+                <circle className="semantic-face-marker-origin-halo" cx={point.x} cy={point.y} r={active ? 9 : 8} />
+                <circle className="semantic-face-marker-origin-ring" cx={point.x} cy={point.y} r={active ? 7 : 6} />
+                <circle className="semantic-face-marker-origin-dot" cx={point.x} cy={point.y} r="2" />
+                <line className="semantic-face-marker-cross" x1={point.x - 9} y1={point.y} x2={point.x + 9} y2={point.y} />
+                <line className="semantic-face-marker-cross" x1={point.x} y1={point.y - 9} x2={point.x} y2={point.y + 9} />
+                {marker.u && <line className="semantic-face-marker-u" markerEnd={`url(#${semanticFaceArrowUId})`} x1={point.x} y1={point.y} x2={point.x + marker.u.x * size} y2={point.y - marker.u.y * size} />}
+                {marker.v && <line className="semantic-face-marker-v" markerEnd={`url(#${semanticFaceArrowVId})`} x1={point.x} y1={point.y} x2={point.x + marker.v.x * size} y2={point.y - marker.v.y * size} />}
+                {marker.outOfPlane && <text className="semantic-face-marker-out" x={point.x + 10} y={point.y + 15}>{marker.outOfPlane.toUpperCase()}⊙</text>}
+                <text className="semantic-face-marker-origin-note" x={point.x + 10} y={point.y + (marker.outOfPlane ? 29 : 15)}>O · 截面投影原点</text>
+              </>
+            )}
+            <text className="semantic-face-marker-label" x={point.x + 10} y={point.y - 11 - labelRow * 13}>
+              {marker.label}{marker.capSide ? ` · ${marker.capSide === "end" ? "终止端" : "起始端"}` : ""}
+            </text>
+          </g>
+        );
+      })}
       {boxSelection?.hasMoved ? (() => {
         const selectionBox = normalizeSketchSelectionBox(
           boxSelection.originView,
@@ -2503,6 +2701,18 @@ export function ParametricSketchCanvas({
                 />
               </>
             ) : null}
+          </g>
+        );
+      })}
+      {laidOutSemanticFaceMarkers.map(({ marker, drawAxes }) => {
+        if (!drawAxes) return null;
+        const point = screen(marker.origin);
+        const active = marker.id === highlightedSemanticFaceId;
+        return (
+          <g key={`${marker.id}.origin-top`} className={`semantic-face-marker semantic-face-marker-top${active ? " active" : ""}`} pointerEvents="none">
+            <circle className="semantic-face-marker-origin-halo" cx={point.x} cy={point.y} r={active ? 9 : 8} />
+            <circle className="semantic-face-marker-origin-ring" cx={point.x} cy={point.y} r={active ? 7 : 6} />
+            <circle className="semantic-face-marker-origin-dot" cx={point.x} cy={point.y} r="2" />
           </g>
         );
       })}
@@ -2650,7 +2860,7 @@ export function ParametricSketchCanvas({
         visibility="hidden"
         pointerEvents="none"
       />
-      <text x="12" y="20" className="solver-label">
+      <text x="12" y="20" className="solver-label" pointerEvents="none">
         {caseName.toUpperCase()} · {solved?.valid ? "SOLVED" : "EDITING"} ·{" "}
         {selected.length ? `${selected.length} SELECTED` : tool.toUpperCase()}
       </text>
