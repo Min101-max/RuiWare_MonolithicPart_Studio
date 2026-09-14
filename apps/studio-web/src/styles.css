@@ -1428,6 +1428,32 @@ code {
 .face-binding-option strong { font-size: 8px; }
 .face-binding-option code { font-size: 7px; color: #64727b; }
 .semantic-face-contract { margin-top: 12px; }
+.semantic-face-marker-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #52606a; margin-right: 10px; }
+.semantic-face-marker { color: #7c3aed; }
+.semantic-face-marker circle { fill: #f5f3ff; stroke: currentColor; stroke-width: 2; }
+.semantic-face-marker line { stroke: currentColor; stroke-width: 1.5; }
+.semantic-face-marker .semantic-face-marker-source { stroke: #a855f7; stroke-width: 5; stroke-opacity: .42; stroke-dasharray: 7 4; stroke-linecap: round; }
+.semantic-face-marker .semantic-face-marker-origin-halo { fill: #fff; stroke: #fff; stroke-width: 5; }
+.semantic-face-marker .semantic-face-marker-origin-ring { fill: #fff; stroke: #7c3aed; stroke-width: 2.5; }
+.semantic-face-marker .semantic-face-marker-origin-dot { fill: #7c3aed; stroke: #fff; stroke-width: 1; }
+.semantic-face-marker .semantic-face-marker-cross { stroke: #7c3aed; stroke-width: 1.2; }
+.semantic-face-marker .semantic-face-marker-u { stroke: #2563eb; }
+.semantic-face-marker .semantic-face-marker-v { stroke: #16a34a; }
+.semantic-face-marker text { fill: currentColor; font-size: 10px; font-weight: 600; paint-order: stroke; stroke: white; stroke-width: 3px; }
+.semantic-face-marker-out { fill: #64748b; font-size: 9px; }
+.semantic-face-marker .semantic-face-marker-origin-note { fill: #5b21b6; font-size: 9px; font-weight: 500; }
+.semantic-face-marker .semantic-face-marker-label { font-weight: 700; }
+.semantic-face-marker.active circle { fill: #ede9fe; stroke: #6d28d9; stroke-width: 3; }
+.semantic-face-marker.active .semantic-face-marker-origin-dot { fill: #6d28d9; stroke: #fff; stroke-width: 1; }
+.semantic-face-actions { display: flex; align-items: center; gap: 6px; grid-column: 1 / -1; }
+.semantic-face-locate { align-self: end; }
+.semantic-face-locate.active { color: #6d28d9; border-color: #8b5cf6; }
+.semantic-face-unresolved { align-self: end; color: #b45309; font-size: 8px; white-space: nowrap; }
+.semantic-face-marker-legend { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.semantic-face-marker-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 1px solid currentColor; }
+.semantic-face-marker-legend .legend-origin { background: #f5f3ff; color: #7c3aed; }
+.semantic-face-marker-legend .legend-u { width: 14px; height: 3px; border: 0; border-radius: 0; background: #2563eb; }
+.semantic-face-marker-legend .legend-v { width: 14px; height: 3px; border: 0; border-radius: 0; background: #16a34a; }
 .semantic-face-responsibilities {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
