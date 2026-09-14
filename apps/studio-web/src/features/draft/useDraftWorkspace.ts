@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError, toErrorNotice, type ErrorNotice } from "../../api";
 import { STAGES } from "../workflow/stageConfig";
 import { useDraftSyncChannel, type DraftChangedEvent } from "./draftSyncChannel";
+import { hydratePreflightFromDraft, runStagePreflight, STAGE_PREFLIGHT_ORDER, type PreflightResult } from "./stagePreflight";
 import type {
   CompileResult,
   Draft,
@@ -43,6 +44,9 @@ export function useDraftWorkspace() {
   const dirtyRef = useRef(false);
   const compileRef = useRef<CompileResult | null>(null);
   const conflictRevisionRef = useRef<number | null>(null);
+  const preflightRunRef = useRef(0);
+  const preflightActiveRef = useRef(false);
+  const preflightControllerRef = useRef<AbortController | null>(null);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [stage, setStage] = useState<StageName>("templateInfo");
@@ -50,6 +54,8 @@ export function useDraftWorkspace() {
   const [compile, setCompile] = useState<CompileResult | null>(null);
   const [compileStatus, setCompileStatus] = useState<"idle" | "generating" | "succeeded" | "failed">("idle");
   const [compileStale, setCompileStale] = useState(false);
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
+  const [preflightStale, setPreflightStale] = useState(false);
   const [versions, setVersions] = useState<PublishedVersion[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [registry, setRegistry] = useState<TemplateAuthoringRegistry | null>(null);
@@ -69,6 +75,38 @@ export function useDraftWorkspace() {
     compileRef.current = compile;
   }, [draft, dirty, compile]);
 
+  function setCompletedStagePreflight(nextDraft: Draft, completedStage: StageName, stageValidation: StageValidation) {
+    const stage = completedStage as (typeof STAGE_PREFLIGHT_ORDER)[number];
+    if (!STAGE_PREFLIGHT_ORDER.includes(stage)) return;
+    const allComplete = STAGE_PREFLIGHT_ORDER.every((item) => nextDraft.stageStatus[item] === "complete");
+    if (!allComplete && stageValidation.complete) return;
+    const previous = preflight && !preflightStale ? preflight.stages : [];
+    const stages = STAGE_PREFLIGHT_ORDER.map((item) => {
+      if (item === stage) return { stage: item, status: stageValidation.complete ? "passed" as const : "failed" as const, validation: stageValidation };
+      const existing = previous.find((entry) => entry.stage === item);
+      if (existing && nextDraft.stageStatus[item] === "complete") return { ...existing, status: existing.status === "failed" ? "failed" as const : "passed" as const };
+      return { stage: item, status: nextDraft.stageStatus[item] === "complete" ? "passed" as const : "pending" as const };
+    });
+    const failedStages = stages.filter((item) => item.status === "failed").map((item) => item.stage);
+    setPreflight({
+      checkedRevision: nextDraft.revision,
+      status: failedStages.length || !allComplete ? "failed" : "passed",
+      stages,
+      failedStages,
+    });
+    setPreflightStale(false);
+  }
+
+  function invalidatePreflight() {
+    const wasActive = preflightActiveRef.current;
+    preflightRunRef.current += 1;
+    preflightControllerRef.current?.abort();
+    preflightControllerRef.current = null;
+    preflightActiveRef.current = false;
+    if (wasActive) setPreflight((current) => current?.status === "checking" ? null : current);
+    if (wasActive) setBusy((value) => value === "preflight" ? "" : value);
+  }
+
   function showError(errorValue: unknown) {
     setError(toErrorNotice(errorValue));
     if (errorTimerRef.current != null) window.clearTimeout(errorTimerRef.current);
@@ -79,6 +117,7 @@ export function useDraftWorkspace() {
   }
 
   function chooseDraft(item: Draft) {
+    invalidatePreflight();
     setDraft(structuredClone(item));
     setSyncConflict(null);
     setRemoteChange(null);
@@ -88,6 +127,8 @@ export function useDraftWorkspace() {
     setCompile(null);
     setCompileStatus("idle");
     setCompileStale(false);
+    setPreflight(hydratePreflightFromDraft(item));
+    setPreflightStale(false);
     setVersions([]);
     const next = STAGES.find((itemStage) => item.stageStatus[itemStage.id] !== "complete");
     setStage(next?.id || "variants");
@@ -153,6 +194,7 @@ export function useDraftWorkspace() {
   }
 
   function applyRemoteDraft(remoteDraft: Draft, change?: DraftChangedEvent) {
+    invalidatePreflight();
     setDraft(structuredClone(remoteDraft));
     setDrafts((items) => items.map((item) => (item.id === remoteDraft.id ? remoteDraft : item)));
     setDirty(false);
@@ -161,6 +203,7 @@ export function useDraftWorkspace() {
     conflictRevisionRef.current = null;
     setValidation(null);
     setCompileStale(!!compileRef.current);
+    if (preflight) setPreflightStale(true);
     showNotice(`已同步 Agent 修改（R${remoteDraft.revision}）`);
   }
 
@@ -180,6 +223,7 @@ export function useDraftWorkspace() {
   async function syncCurrentDraft(change?: DraftChangedEvent) {
     const localDraft = draftRef.current;
     if (!localDraft?.id) return;
+    if (preflightActiveRef.current) return;
     try {
       const remoteDraft = await api.draft(localDraft.id);
       if (!remoteDraftNeedsSync(localDraft, remoteDraft)) return;
@@ -201,6 +245,15 @@ export function useDraftWorkspace() {
   useEffect(() => {
     if (!draft?.id) return;
     setValidation(null);
+    if (stage === "review" && !preflightStale && !dirty) {
+      const current = preflight ?? hydratePreflightFromDraft(draft);
+      if (current && current.checkedRevision === draft.revision) {
+        if (!preflight) setPreflight(current);
+        setValidation(current.status === "failed"
+          ? current.stages.find((item) => item.status === "failed")?.validation ?? null
+          : null);
+      }
+    }
     if (stage === "material") {
       void api.materials(materialSearch, draft.id).then(setMaterials).catch(showError);
     }
@@ -214,7 +267,7 @@ export function useDraftWorkspace() {
     if (stage === "admission") {
       void api.versions(draft.id).then(setVersions).catch(showError);
     }
-  }, [stage, draft?.id]);
+  }, [stage, draft?.id, draft?.revision]);
 
   useDraftSyncChannel({
     draftId: draft?.id ?? null,
@@ -242,13 +295,16 @@ export function useDraftWorkspace() {
   );
 
   function change(next: Draft) {
+    invalidatePreflight();
     setDraft(next);
     setDirty(true);
     setValidation(null);
     if (compile) setCompileStale(true);
+    if (preflight) setPreflightStale(true);
   }
 
   function adoptSavedDraft(saved: Draft) {
+    invalidatePreflight();
     setDraft(structuredClone(saved));
     setDrafts((items) => items.map((item) => (item.id === saved.id ? saved : item)));
     setDirty(false);
@@ -257,6 +313,7 @@ export function useDraftWorkspace() {
     setRemoteChange(null);
     conflictRevisionRef.current = null;
     if (compileRef.current) setCompileStale(true);
+    if (preflight) setPreflightStale(true);
   }
 
   function resolveSyncConflict(action: "reload" | "dismiss") {
@@ -280,6 +337,8 @@ export function useDraftWorkspace() {
       setSyncConflict(null);
       setRemoteChange(null);
       conflictRevisionRef.current = null;
+      invalidatePreflight();
+      if (preflight) setPreflightStale(true);
       showNotice("已保存为新修订");
       return saved;
     } catch (errorValue) {
@@ -290,10 +349,22 @@ export function useDraftWorkspace() {
     }
   }
 
-  async function check() {
+  async function check(options: { force?: boolean } = {}) {
     if (!draft?.id) return;
     const saved = dirty ? await save() : draft;
     if (!saved?.id) return;
+    if (stage === "review") {
+      const fresh = preflight && !preflightStale && preflight.checkedRevision === saved.revision;
+      if (fresh && !options.force) {
+        setValidation(preflight.status === "failed"
+          ? preflight.stages.find((item) => item.status === "failed")?.validation ?? null
+          : null);
+        showNotice(preflight.status === "passed" ? "前置检查结果已同步" : "前置阶段存在问题，请按提示修改");
+        return;
+      }
+      await checkPrerequisites(!!options.force, saved);
+      return;
+    }
     setBusy("check");
     try {
       setValidation(await api.validateStage(saved.id, stage));
@@ -314,6 +385,9 @@ export function useDraftWorkspace() {
       setDraft(result.draft);
       setDrafts((items) => items.map((item) => (item.id === result.draft.id ? result.draft : item)));
       setValidation(result.validation);
+      invalidatePreflight();
+      if (preflight) setPreflightStale(true);
+      setCompletedStagePreflight(result.draft, stage, result.validation);
       if (result.validation.complete) {
         const index = STAGES.findIndex((item) => item.id === stage);
         if (index < STAGES.length - 1) setStage(STAGES[index + 1].id);
@@ -409,6 +483,10 @@ export function useDraftWorkspace() {
 
   async function runCompile() {
     if (!draft?.id) return;
+    if (!preflight || preflight.status !== "passed" || preflightStale || preflight.checkedRevision !== draft.revision) {
+      showNotice("请先完成前置阶段检查");
+      return;
+    }
     const saved = dirty ? await save() : draft;
     if (!saved?.id) return;
     setBusy("compile");
@@ -430,6 +508,63 @@ export function useDraftWorkspace() {
       await showRevisionConflict(errorValue, saved.id);
     } finally {
       setBusy("");
+    }
+  }
+
+  async function checkPrerequisites(force = false, sourceDraft: Draft | null = draft) {
+    if (!sourceDraft?.id || busy || preflightActiveRef.current) return;
+    const saved = sourceDraft === draft && dirty ? await save() : sourceDraft;
+    if (!saved?.id) return;
+    const fresh = preflight && !preflightStale && preflight.checkedRevision === saved.revision;
+    if (fresh && !force) {
+      setValidation(preflight.status === "failed"
+        ? preflight.stages.find((item) => item.status === "failed")?.validation ?? null
+        : null);
+      showNotice(preflight.status === "passed" ? "前置检查结果已同步" : "前置阶段存在问题，请按提示修改");
+      return;
+    }
+    const runId = ++preflightRunRef.current;
+    const controller = new AbortController();
+    preflightControllerRef.current?.abort();
+    preflightControllerRef.current = controller;
+    preflightActiveRef.current = true;
+    setBusy("preflight");
+    setPreflightStale(false);
+    setPreflight({ checkedRevision: saved.revision, status: "checking", stages: [], failedStages: [] });
+    let checkedDraft: Draft | null = null;
+    try {
+      const outcome = await runStagePreflight(saved, (progress) => {
+        if (runId === preflightRunRef.current) setPreflight(progress);
+      }, api, controller.signal, { force });
+      if (runId !== preflightRunRef.current) return;
+      checkedDraft = outcome.draft;
+      draftRef.current = outcome.draft;
+      dirtyRef.current = false;
+      setDraft(outcome.draft);
+      setDrafts((items) => items.map((item) => (item.id === outcome.draft.id ? outcome.draft : item)));
+      setDirty(false);
+      setPreflight(outcome.result);
+      setPreflightStale(false);
+      setValidation(
+        outcome.result.status === "failed"
+          ? outcome.result.stages.find((item) => item.status === "failed")?.validation ?? null
+          : null,
+      );
+      showNotice(outcome.result.status === "passed" ? "前置阶段检查通过，可运行 B-Rep 编译" : "前置阶段存在问题，请按提示修改");
+    } catch (errorValue) {
+      if (runId === preflightRunRef.current && !controller.signal.aborted) {
+        setPreflight(null);
+        setPreflightStale(false);
+        await showRevisionConflict(errorValue, saved.id);
+      }
+    } finally {
+      const current = runId === preflightRunRef.current;
+      if (preflightControllerRef.current === controller) {
+        preflightActiveRef.current = false;
+        preflightControllerRef.current = null;
+        setBusy((value) => value === "preflight" ? "" : value);
+      }
+      if (current && checkedDraft) void syncCurrentDraft();
     }
   }
 
@@ -461,6 +596,8 @@ export function useDraftWorkspace() {
     compile,
     compileStatus,
     compileStale,
+    preflight,
+    preflightStale,
     versions,
     materials,
     registry,
@@ -489,6 +626,7 @@ export function useDraftWorkspace() {
     archive,
     bindMaterial,
     runCompile,
+    checkPrerequisites,
     publish,
     showError,
     reload: loadDrafts,
