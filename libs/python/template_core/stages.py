@@ -743,6 +743,11 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
             interface_reasons.append(f"特征派生接口 {item.id} 未选择来源制造特征规则")
         if item.required and not item.reviewed:
             interface_reasons.append(f"关键接口 {item.id} 尚未完成工程师复核")
+        if item.interfaceType == "locating" and item.locatingType == "planeContact" and item.region and item.region.mode == "rectangle":
+            if item.region.uSpan is None or item.region.vSpan is None:
+                interface_reasons.append(f"面贴合接口 {item.id} 的矩形区域缺少 U/V 尺寸")
+            elif item.region.uSpan <= 0 or item.region.vSpan <= 0:
+                interface_reasons.append(f"面贴合接口 {item.id} 的矩形区域尺寸必须大于零")
     interfaces_complete = not interface_reasons
 
     evaluation = evaluate_template(

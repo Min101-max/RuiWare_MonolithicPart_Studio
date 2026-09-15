@@ -7,20 +7,28 @@ import type { CompileResult, Draft, ResolvedFeature, TemplateEvaluation } from "
 
 const COLORS = ["#dc3f55", "#2478d0", "#15966b", "#9a52d0", "#d27a16", "#008d9e"];
 
-function FaceOverlay({ hostFrame, color, min, max }: { hostFrame: string; color: string; min: [number, number, number]; max: [number, number, number] }) {
+function FaceOverlay({ hostFrame, color, min, max, region }: { hostFrame: string; color: string; min: [number, number, number]; max: [number, number, number]; region?: { mode: "fullFace" | "rectangle"; uStart: number; vStart: number; uSpan?: number | null; vSpan?: number | null } | null }) {
   const offset = 0.8;
   const material = <meshBasicMaterial color={color} transparent opacity={0} depthWrite={false} side={2} />;
+  const fullU = hostFrame === "negativeX" || hostFrame === "positiveX" ? max[1] - min[1] : max[0] - min[0];
+  const fullV = hostFrame === "negativeZ" || hostFrame === "positiveZ" ? max[1] - min[1] : max[2] - min[2];
+  const u0 = region?.mode === "rectangle" ? region.uStart : 0;
+  const v0 = region?.mode === "rectangle" ? region.vStart : 0;
+  const uSpan = region?.mode === "rectangle" && region.uSpan ? region.uSpan : fullU;
+  const vSpan = region?.mode === "rectangle" && region.vSpan ? region.vSpan : fullV;
+  const uCenter = (hostFrame === "negativeX" || hostFrame === "positiveX" ? min[1] : min[0]) + u0 + uSpan / 2;
+  const vCenter = (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? min[1] : min[2]) + v0 + vSpan / 2;
   if (hostFrame === "negativeY" || hostFrame === "positiveY") {
     const y = (hostFrame === "negativeY" ? min[1] : max[1]) + (hostFrame === "negativeY" ? -offset : offset);
-    return <mesh position={[(min[0] + max[0]) / 2, y, (min[2] + max[2]) / 2]} rotation={[Math.PI / 2, 0, 0]} scale={[max[0] - min[0], max[2] - min[2], 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
+    return <mesh position={[uCenter, y, vCenter]} rotation={[Math.PI / 2, 0, 0]} scale={[uSpan, vSpan, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
   }
   if (hostFrame === "negativeX" || hostFrame === "positiveX") {
     const x = (hostFrame === "negativeX" ? min[0] : max[0]) + (hostFrame === "negativeX" ? -offset : offset);
-    return <mesh position={[x, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]} rotation={[0, Math.PI / 2, 0]} scale={[max[2] - min[2], max[1] - min[1], 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
+    return <mesh position={[x, uCenter, vCenter]} rotation={[0, Math.PI / 2, 0]} scale={[vSpan, uSpan, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
   }
   if (hostFrame === "negativeZ" || hostFrame === "positiveZ") {
     const z = (hostFrame === "negativeZ" ? min[2] : max[2]) + (hostFrame === "negativeZ" ? -offset : offset);
-    return <mesh position={[(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, z]} scale={[max[0] - min[0], max[1] - min[1], 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
+    return <mesh position={[uCenter, vCenter, z]} scale={[uSpan, vSpan, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
   }
   return null;
 }
@@ -32,7 +40,7 @@ function InterfaceOverlays({ draft, min, max }: { draft: Draft; min: [number, nu
     const rule = item.sourceFeatureRuleId ? draft.featureRules.find((candidate) => candidate.id === item.sourceFeatureRuleId) : undefined;
     const faceIds = item.geometryRefs.length ? item.geometryRefs : rule?.faceBindings.map((binding) => binding.semanticFaceId) || [];
     const color = COLORS[index % COLORS.length];
-    return faceIds.map((faceId) => { const face = byId.get(faceId); return face ? <FaceOverlay key={`${item.id}-${faceId}`} hostFrame={face.hostFrame} color={color} min={min} max={max} /> : null; });
+    return faceIds.map((faceId) => { const face = byId.get(faceId); return face ? <FaceOverlay key={`${item.id}-${faceId}`} hostFrame={face.hostFrame} color={color} min={min} max={max} region={item.region} /> : null; });
   })}</>;
 }
 
