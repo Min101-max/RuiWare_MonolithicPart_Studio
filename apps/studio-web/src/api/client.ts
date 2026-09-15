@@ -82,6 +82,8 @@ export const api = {
   executeTask: (id: string, task: "completeCurrentStage" | "fixCurrentErrors" | "prepareCadCompile" | "checkPublishReadiness", baseRevision: number, confirmed: boolean, input: Record<string, unknown> = {}) => request<Record<string, unknown>>(`/api/v1/template-drafts/${id}/assistant/tasks/execute`, json("POST", { task, baseRevision, confirmed, input })),
   resolveMaterial: (id: string) => request<{ material: Material; provenance: { drifted: boolean; resolvedChecksum: string } }>(`/api/v1/material-bindings/${id}/resolved`),
   compile: (id: string) => request<CompileResult>(`/api/v1/template-drafts/${id}/compile`, json("POST")),
+  compilePreview: (draft: Draft, materialSnapshot: Record<string, unknown> = {}) =>
+    request<CompileResult>("/api/v1/compile-preview", json("POST", { draft, materialSnapshot })),
   latestCompile: (id: string) => request<CompileResult | null>(`/api/v1/template-drafts/${id}/compile-runs/latest`),
   versions: (id: string) => request<PublishedVersion[]>(`/api/v1/template-drafts/${id}/versions`),
   publish: (id: string) => request<PublishResult>(`/api/v1/template-drafts/${id}/publish`, json("POST")),

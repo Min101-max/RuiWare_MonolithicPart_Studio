@@ -193,7 +193,7 @@ export function ContractStage({
         />
       )}
       {tab === "interfaces" && (
-        <InterfaceEditor draft={draft} change={change} />
+        <InterfaceEditor draft={draft} change={change} save={save} />
       )}
       {tab === "simulation" && (
         <ContractSimulationWorkspace

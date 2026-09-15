@@ -48,28 +48,22 @@ if (-not $BunExecutable -and -not ($NodeExecutable -and $ViteCli)) {
     throw 'Missing Bun/Node/Vite. Install Bun or Node dependencies first.'
 }
 
-Start-Process -FilePath $PythonExecutable `
-    -ArgumentList @('-m', 'uvicorn', 'app.main:app', '--app-dir', 'services/template-api', '--host', '127.0.0.1', '--port', $ApiPort) `
-    -WorkingDirectory $ProjectRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $ProjectRoot 'api.out.log') `
-    -RedirectStandardError (Join-Path $ProjectRoot 'api.err.log')
+$apiCommand = '"{0}" -m uvicorn app.main:app --app-dir services/template-api --host 127.0.0.1 --port {1} 1>"{2}" 2>"{3}"' -f `
+    $PythonExecutable, $ApiPort, (Join-Path $ProjectRoot 'api.out.log'), (Join-Path $ProjectRoot 'api.err.log')
+cmd.exe /d /c "cd /d `"$ProjectRoot`" && start `"RuiWare Template API`" /b $apiCommand"
 
 if ($BunExecutable -and (Get-Command node.exe -ErrorAction SilentlyContinue)) {
-    $WebFile = $BunExecutable
-    $WebArguments = @('--cwd', 'apps/studio-web', 'dev', '--host', '127.0.0.1', '--port', $WebPort)
     $WebWorkingDirectory = $ProjectRoot
 } else {
-    $WebFile = $NodeExecutable
-    $WebArguments = @($ViteCli, 'dev', '--host', '127.0.0.1', '--port', $WebPort)
     $WebWorkingDirectory = Join-Path $ProjectRoot 'apps\studio-web'
 }
-Start-Process -FilePath $WebFile `
-    -ArgumentList $WebArguments `
-    -WorkingDirectory $WebWorkingDirectory `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $ProjectRoot 'web.out.log') `
-    -RedirectStandardError (Join-Path $ProjectRoot 'web.err.log')
+$webCommand = if ($BunExecutable) {
+    '"{0}" --cwd apps/studio-web dev --host 127.0.0.1 --port {1}' -f $BunExecutable, $WebPort
+} else {
+    '"{0}" "{1}" dev --host 127.0.0.1 --port {2}' -f $NodeExecutable, $ViteCli, $WebPort
+}
+$webCommand = '{0} 1>"{1}" 2>"{2}"' -f $webCommand, (Join-Path $ProjectRoot 'web.out.log'), (Join-Path $ProjectRoot 'web.err.log')
+cmd.exe /d /c "cd /d `"$WebWorkingDirectory`" && start `"RuiWare Template Studio`" /b $webCommand"
 
 Write-Host "Template API: http://127.0.0.1:$ApiPort"
 Write-Host "Template Studio: http://127.0.0.1:$WebPort"

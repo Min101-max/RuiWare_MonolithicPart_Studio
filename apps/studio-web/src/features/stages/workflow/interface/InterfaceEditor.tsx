@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
 import { ChevronDown, Link2, Plus, Trash2 } from "lucide-react";
+import { api } from "../../../../api";
 import { Field, PanelTitle } from "../../../../components/ui/FormParts";
-import type { Draft, PartInterface } from "../../../../types";
+import type { CompileResult, Draft, PartInterface, TemplateEvaluation } from "../../../../types";
+import { InterfacePreview3D } from "./InterfacePreview3D";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
 
@@ -13,9 +16,14 @@ const csv = (value: string) =>
 type InterfaceEditorProps = {
   draft: Draft;
   change: (draft: Draft) => void;
+  save?: (draft?: Draft | null) => Promise<Draft | null | undefined>;
 };
 
-export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
+export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
+  const [preview, setPreview] = useState<CompileResult | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewEvaluation, setPreviewEvaluation] = useState<TemplateEvaluation | null>(null);
   const setItems = (interfaces: PartInterface[]) =>
     change({ ...draft, interfaces });
   const geometryRefs = draft.geometryRecipe.semanticFaces;
@@ -53,6 +61,25 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
         reviewed: false,
       },
     ]);
+  const refreshPreview = async () => {
+    setPreviewBusy(true);
+    setPreviewError("");
+    try {
+      const sample = draft.materialValidationSamples.find((item) => item.role === "nominal") || draft.materialValidationSamples[0];
+      const materialSnapshot = { record: { code: sample?.materialCode || "preview", name: sample?.materialName || "预览材料", thickness: sample?.materialThickness }, provenance: { source: "interface-preview" } };
+      const source = save ? await save(draft) : draft;
+      if (!source) return;
+      const result = await api.compilePreview(source, materialSnapshot);
+      setPreview(result);
+      if (source.id) setPreviewEvaluation(await api.evaluate(source.id, { overrides: {} }));
+      if (!result.success) setPreviewError(result.diagnostics.map((item) => item.message).join("；") || "B-Rep 预览未通过");
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "预览生成失败");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  useEffect(() => { setPreview(null); setPreviewError(""); }, [draft.id]);
   return (
     <div className="panel">
       <PanelTitle
@@ -360,6 +387,7 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
           ))}
         </div>
       )}
+      <InterfacePreview3D draft={draft} result={preview} evaluation={previewEvaluation} busy={previewBusy} error={previewError} onRefresh={() => void refreshPreview()} />
     </div>
   );
 }
