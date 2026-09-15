@@ -7,44 +7,47 @@ import type { CompileResult, Draft, ResolvedFeature, TemplateEvaluation } from "
 
 const COLORS = ["#dc3f55", "#2478d0", "#15966b", "#9a52d0", "#d27a16", "#008d9e"];
 
-function FaceOverlay({ hostFrame, color, width, height, length }: { hostFrame: string; color: string; width: number; height: number; length: number }) {
+function FaceOverlay({ hostFrame, color, min, max }: { hostFrame: string; color: string; min: [number, number, number]; max: [number, number, number] }) {
   const offset = 0.8;
   const material = <meshBasicMaterial color={color} transparent opacity={0} depthWrite={false} side={2} />;
   if (hostFrame === "negativeY" || hostFrame === "positiveY") {
-    const y = hostFrame === "negativeY" ? -height / 2 - offset : height / 2 + offset;
-    return <mesh position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]} scale={[width, length, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
+    const y = (hostFrame === "negativeY" ? min[1] : max[1]) + (hostFrame === "negativeY" ? -offset : offset);
+    return <mesh position={[(min[0] + max[0]) / 2, y, (min[2] + max[2]) / 2]} rotation={[Math.PI / 2, 0, 0]} scale={[max[0] - min[0], max[2] - min[2], 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
   }
   if (hostFrame === "negativeX" || hostFrame === "positiveX") {
-    const x = hostFrame === "negativeX" ? -width / 2 - offset : width / 2 + offset;
-    return <mesh position={[x, 0, 0]} rotation={[0, Math.PI / 2, 0]} scale={[height, length, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
+    const x = (hostFrame === "negativeX" ? min[0] : max[0]) + (hostFrame === "negativeX" ? -offset : offset);
+    return <mesh position={[x, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2]} rotation={[0, Math.PI / 2, 0]} scale={[max[2] - min[2], max[1] - min[1], 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
   }
   if (hostFrame === "negativeZ" || hostFrame === "positiveZ") {
-    const z = hostFrame === "negativeZ" ? -length / 2 - offset : length / 2 + offset;
-    return <mesh position={[0, 0, z]} scale={[width, height, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
+    const z = (hostFrame === "negativeZ" ? min[2] : max[2]) + (hostFrame === "negativeZ" ? -offset : offset);
+    return <mesh position={[(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, z]} scale={[max[0] - min[0], max[1] - min[1], 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;
   }
   return null;
 }
 
-function InterfaceOverlays({ draft, width, height, length }: { draft: Draft; width: number; height: number; length: number }) {
+function InterfaceOverlays({ draft, min, max }: { draft: Draft; min: [number, number, number]; max: [number, number, number] }) {
   const byId = new Map(draft.geometryRecipe.semanticFaces.map((face) => [face.id, face]));
   return <>{draft.interfaces.map((item, index) => {
     if (item.declarationMode === "featureDerived") return null;
     const rule = item.sourceFeatureRuleId ? draft.featureRules.find((candidate) => candidate.id === item.sourceFeatureRuleId) : undefined;
     const faceIds = item.geometryRefs.length ? item.geometryRefs : rule?.faceBindings.map((binding) => binding.semanticFaceId) || [];
     const color = COLORS[index % COLORS.length];
-    return faceIds.map((faceId) => { const face = byId.get(faceId); return face ? <FaceOverlay key={`${item.id}-${faceId}`} hostFrame={face.hostFrame} color={color} width={width} height={height} length={length} /> : null; });
+    return faceIds.map((faceId) => { const face = byId.get(faceId); return face ? <FaceOverlay key={`${item.id}-${faceId}`} hostFrame={face.hostFrame} color={color} min={min} max={max} /> : null; });
   })}</>;
 }
 
-function FeatureOutline({ feature, color, width, height, length }: { feature: ResolvedFeature; color: string; width: number; height: number; length: number }) {
+function FeatureOutline({ feature, color, width, height, length, center }: { feature: ResolvedFeature; color: string; width: number; height: number; length: number; center: [number, number, number] }) {
   const args = feature.arguments;
-  const x = Number(args.x ?? 0);
-  const z = Number(args.z ?? 0) - length / 2;
+  const x = Number(args.x ?? 0) - center[0];
+  const z = Number(args.z ?? 0) - center[2];
   const size = Number(args.diameter ?? args.width ?? 10);
   const host = feature.hostFace;
   if (feature.featureType === "circularHole") {
     const radius = Math.max(1, size / 2);
+    const y = Number(args.x ?? 0) - center[1];
     if (host === "negativeY" || host === "positiveY") return <mesh position={[x, host === "negativeY" ? -height / 2 - 0.8 : height / 2 + 0.8, z]} rotation={[Math.PI / 2, 0, 0]} renderOrder={5}><torusGeometry args={[radius, Math.max(0.8, radius * 0.08), 8, 40]} /><meshBasicMaterial color={color} /></mesh>;
+    if (host === "negativeX" || host === "positiveX") return <mesh position={[host === "negativeX" ? -width / 2 - 0.8 : width / 2 + 0.8, y, z]} rotation={[0, Math.PI / 2, 0]} renderOrder={5}><torusGeometry args={[radius, Math.max(0.8, radius * 0.08), 8, 40]} /><meshBasicMaterial color={color} /></mesh>;
+    if (host === "negativeZ" || host === "positiveZ") return <mesh position={[x, Number(args.z ?? 0) - center[1], host === "negativeZ" ? -length / 2 - 0.8 : length / 2 + 0.8]} renderOrder={5}><torusGeometry args={[radius, Math.max(0.8, radius * 0.08), 8, 40]} /><meshBasicMaterial color={color} /></mesh>;
   }
   const w = feature.featureType === "circularHole" ? size : Number(args.width ?? size);
   const d = feature.featureType === "straightSlot" ? Number(args.length ?? size) : Number(args.height ?? size);
@@ -70,7 +73,9 @@ function PreviewScene({ url, draft, evaluation }: { url: string; draft: Draft; e
   const center: [number, number, number] = [((min?.x || 0) + (max?.x || 0)) / 2, ((min?.y || 0) + (max?.y || 0)) / 2, ((min?.z || 0) + (max?.z || 0)) / 2];
   const interfaceIds = new Set(draft.interfaces.map((item) => item.id));
   const featureInterfaces = (evaluation?.resolvedInterfaces || []).filter((item) => item.sourceFeatureId && interfaceIds.has(item.sourceInterfaceId));
-  return <group position={[-center[0], -center[1], -center[2]]}><mesh geometry={geometry} castShadow receiveShadow><meshStandardMaterial color="#9ca8b3" roughness={0.38} metalness={0.28} /></mesh><InterfaceOverlays draft={draft} width={width} height={height} length={length} />{featureInterfaces.map((item, index) => { const feature = evaluation?.features.find((candidate) => candidate.id === item.sourceFeatureId); return feature ? <FeatureOutline key={item.id} feature={feature} color={COLORS[draft.interfaces.findIndex((candidate) => candidate.id === item.sourceInterfaceId) % COLORS.length] || COLORS[index % COLORS.length]} width={width} height={height} length={length} /> : null; })}</group>;
+  const localMin: [number, number, number] = [min ? min.x - center[0] : -width / 2, min ? min.y - center[1] : -height / 2, min ? min.z - center[2] : -length / 2];
+  const localMax: [number, number, number] = [max ? max.x - center[0] : width / 2, max ? max.y - center[1] : height / 2, max ? max.z - center[2] : length / 2];
+  return <group><mesh geometry={geometry} position={[-center[0], -center[1], -center[2]]} castShadow receiveShadow><meshStandardMaterial color="#9ca8b3" roughness={0.38} metalness={0.28} /></mesh><InterfaceOverlays draft={draft} min={localMin} max={localMax} />{featureInterfaces.map((item, index) => { const feature = evaluation?.features.find((candidate) => candidate.id === item.sourceFeatureId); return feature ? <FeatureOutline key={item.id} feature={feature} color={COLORS[draft.interfaces.findIndex((candidate) => candidate.id === item.sourceInterfaceId) % COLORS.length] || COLORS[index % COLORS.length]} width={width} height={height} length={length} center={center} /> : null; })}</group>;
 }
 
 export function InterfacePreview3D({ draft, result, evaluation, busy, error, onRefresh }: { draft: Draft; result: CompileResult | null; evaluation: TemplateEvaluation | null; busy: boolean; error: string; onRefresh: () => void }) {
