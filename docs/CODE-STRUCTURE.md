@@ -402,7 +402,7 @@ Repository
 当前已经具备的安全能力：
 
 - API 通过签名 `ruiware_session` Cookie 识别 GUI 会话；MCP 必须使用 `Authorization: Bearer` 对应的 Agent Token，不能仅凭 `X-RuiWare-Actor` 或 `X-RuiWare-Source` 伪造身份。
-- 草稿归属由已验证身份决定，工作区选择由签名 GUI 会话或 Agent 的受控工作区标识决定；同一 Agent 如需读取 GUI 当前选择，应配置与 GUI 相同的工作区会话标识。
+- 草稿归属由已验证身份决定，工作区选择由 `X-RuiWare-Workspace` 标识决定；GUI 和 MCP 默认使用 `ruiware-main`，因此 Agent 可以读取 GUI 当前选择。工作区只负责定位选择，不代替 Cookie 或 Bearer Token 身份认证。
 
 - GUI 和 Agent 都不能直接绕过模板 API 操作数据库，草稿统一通过 `Repository` 保存。
 - 阶段完成、参数契约、草图、材料、CAD 编译和发布均由后端及领域层再次校验，前端校验不是最终安全边界。
@@ -426,12 +426,19 @@ Repository
 
 1. 将当前 `confirmed=true` 布尔确认升级为一次性服务端确认凭证，提交时同时校验操作摘要、草稿版本、操作者和确认令牌。
 2. 为创建、归档、附件等尚未暴露为 MCP 工具的潜在 Agent 写动作预先定义相同的版本与确认规则。
-3. 将全局 `workspace_context` 升级为按用户、会话或工作区隔离，避免不同用户共享当前零部件选择。
+3. 将当前固定的默认工作区升级为可管理的用户级工作区，支持多用户各自选择而不共享工作区标识。
 4. 增加 GUI、Agent、用户和工具维度的身份授权，区分查询、编辑、CAD 执行和发布审批权限。
 5. 完善 Agent 操作审计，记录操作者来源、会话、工具、修改前后版本、变更差异、确认信息和执行结果。
 6. 将现有 GUI 自动刷新、并发修改、版本冲突、参数越界、草图退化、CAD 失败恢复和 MCP 断线重试测试扩展到真实多会话环境。
 
-因此，当前架构的安全结论是：本机单用户场景基本可用；多人协作需要补齐会话隔离、统一并发控制和权限；公网生产部署前还需要认证、授权、审计和更严格的确认机制。
+因此，当前架构的安全结论是：本机单用户场景可通过共享默认工作区让 GUI 与 Agent 协作；多人协作仍需补齐用户级工作区管理、统一并发控制和权限；公网生产部署前还需要正式认证、授权、审计和更严格的确认机制。
+
+### 6.12 GUI 与 Agent 共享当前零部件
+
+- `apps/studio-web/src/api/client.ts` 为所有 GUI API 请求自动附加 `X-RuiWare-Workspace`，并将默认工作区保存到 `localStorage["ruiware.workspaceId"]`。
+- `services/ruiware-mcp/ruiware_mcp/api_client.py` 为 GET、POST、PUT 请求统一附加 `X-RuiWare-Workspace`；默认读取 `RUIWARE_WORKSPACE_ID`，未配置时使用 `ruiware-main`。
+- `services/template-api/app/security.py` 将工作区头与认证身份分开解析：没有工作区头时回退到旧会话 ID，保证旧客户端兼容。
+- 数据库仍按 `owner_id:workspace_id` 保存工作区选择，不会因为 GUI 和 Agent 共用工作区而跨用户共享零部件。
 
 ## 7. 今日变更记录（2026-09-12）
 
