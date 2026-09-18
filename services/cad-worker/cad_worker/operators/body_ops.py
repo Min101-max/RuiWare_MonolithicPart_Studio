@@ -563,6 +563,16 @@ def _connected_line_points(primitives) -> list[tuple[float, float]] | None:
 
 
 def _thinwall_outline(points: list[tuple[float, float]], half_thickness: float) -> list[tuple[float, float]] | None:
+    sides = _thinwall_outline_sides(points, half_thickness)
+    if sides is None:
+        return None
+    left, right = sides
+    return left + list(reversed(right))
+
+
+def _thinwall_outline_sides(
+    points: list[tuple[float, float]], half_thickness: float
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]]] | None:
     if len(points) < 2:
         return None
     if math.dist(points[0], points[-1]) <= 1e-7:
@@ -601,7 +611,7 @@ def _thinwall_outline(points: list[tuple[float, float]], half_thickness: float) 
     last_segment = segments[-1]
     left.append((points[-1][0] + last_segment[3][0], points[-1][1] + last_segment[3][1]))
     right.append((points[-1][0] - last_segment[3][0], points[-1][1] - last_segment[3][1]))
-    return left + list(reversed(right))
+    return left, right
 
 
 def _prism_from_2d_outline(outline: list[tuple[float, float]], plane: str, length: float):
@@ -661,6 +671,74 @@ def _centerline_thinwall_extrude(arguments):
         axis = {"XY": gp_Vec(0, 0, length), "XZ": gp_Vec(0, length, 0), "YZ": gp_Vec(length, 0, 0)}[plane]
         solids.append(BRepPrimAPI_MakePrism(face, axis).Shape())
     return _fuse(*solids)
+
+
+def _centerline_thinwall_extrude_with_face_map(
+    arguments: dict[str, Any],
+    operation_id: str,
+    profile_sketch_id: str,
+) -> tuple[TopoDS_Shape, FaceMap]:
+    sketch = arguments["sketch"]
+    primitives = [item for item in sketch["primitives"] if not item.get("construction")]
+    points = _connected_line_points(primitives)
+    if not points:
+        return _centerline_thinwall_extrude(arguments), {}
+
+    thickness, length = float(arguments["thickness"]), float(arguments["length"])
+    sides = _thinwall_outline_sides(points, thickness / 2)
+    if sides is None:
+        return _centerline_thinwall_extrude(arguments), {}
+    left, right = sides
+    outline = left + list(reversed(right))
+    plane = sketch.get("plane", "XY")
+    outline_points = {
+        "XY": [(u, v, 0.0) for u, v in outline],
+        "XZ": [(u, 0.0, v) for u, v in outline],
+        "YZ": [(0.0, u, v) for u, v in outline],
+    }[plane]
+    wire_builder = BRepBuilderAPI_MakeWire()
+    for start, end in zip(outline_points, [*outline_points[1:], outline_points[0]]):
+        wire_builder.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(*start), gp_Pnt(*end)).Edge())
+    if not wire_builder.IsDone():
+        raise RuntimeError("Thin-wall outline wire construction failed")
+    wire = wire_builder.Wire()
+    face = BRepBuilderAPI_MakeFace(wire, True).Face()
+    prism = BRepPrimAPI_MakePrism(face, _normal_vector(plane, length))
+    prism.Build()
+    if not prism.IsDone():
+        raise RuntimeError("Thin-wall outline extrusion failed")
+    shape = prism.Shape()
+
+    outline_edges: list[TopoDS_Shape] = []
+    explorer = TopExp_Explorer(wire, TopAbs_EDGE)
+    while explorer.More():
+        outline_edges.append(explorer.Current())
+        explorer.Next()
+
+    face_map: FaceMap = {}
+    for index, primitive in enumerate(primitives):
+        if index >= len(outline_edges):
+            break
+        source_edge = outline_edges[index]
+        for generated in prism.Generated(source_edge):
+            for occurrence in _matching_subshapes(shape, generated, TopAbs_FACE):
+                support_face = TopoDS.Face_s(occurrence)
+                frame = _support_frame(support_face)
+                if frame is None:
+                    continue
+                origin, u_direction, v_direction, normal = frame
+                _append_face_support(face_map, FaceSupport(
+                    supportFace=support_face,
+                    origin=origin,
+                    uDirection=u_direction,
+                    vDirection=v_direction,
+                    normal=normal,
+                    sourceEntityId=primitive["id"],
+                    operationId=operation_id,
+                    profileSketchId=profile_sketch_id,
+                    kind="profileEdge",
+                ))
+    return shape, face_map
 
 
 def _body(operation):
@@ -736,6 +814,23 @@ def build_body_with_face_map(operation) -> tuple[TopoDS_Shape, FaceMap]:
             or "sketch.section.main"
         )
         return _sketch_region_extrude_with_face_map(
+            arguments,
+            operation_id,
+            profile_sketch_id,
+        )
+    if (
+        operation.operator == "profile.open_profile_tube_extrude"
+        and sketch
+        and sketch.get("profileMode") == "centerlineThinWall"
+    ):
+        operation_id = str(getattr(operation, "id", "") or arguments.get("operationId", ""))
+        profile_sketch_id = str(
+            arguments.get("profileSketchId")
+            or sketch.get("id")
+            or getattr(operation, "profileSketchId", "")
+            or "sketch.section.main"
+        )
+        return _centerline_thinwall_extrude_with_face_map(
             arguments,
             operation_id,
             profile_sketch_id,

@@ -3,9 +3,11 @@ import math
 import pytest
 
 from cad_worker.geometry import _sketch_sweep, execute_plan
+from cad_worker.operators.body_ops import build_body_with_face_map
 from template_core.lowering import lower_to_plan
 
 from test_lowering import draft
+from template_core.metamodel import FeatureRule, SemanticFaceDefinition
 from template_core.models import SweepPathGeometry, SweepPathSketch, TemplateDraft
 from template_core.sketch_solver import solve_semantic_sketch
 from OCP.BRepClass3d import BRepClass3d_SolidClassifier
@@ -117,6 +119,61 @@ def test_unified_profile_extrude_compiles_open_centerline(tmp_path) -> None:
     value.geometryRecipe.operations[0].operator = "profile.open_profile_tube_extrude"
     value.geometryRecipe.operations[0].argumentExpressions = {"length": "length", "thickness": "thickness"}
     result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path)
+    assert result.success, result.diagnostics
+    assert result.metrics is not None and result.metrics.solidCount == 1
+
+
+def test_centerline_semantic_face_locator_supports_hole_rule(tmp_path) -> None:
+    value = TemplateDraft(name="centerline semantic face hole")
+    value.sketch = value.sketch.model_validate({
+        "profileMode": "centerlineThinWall",
+        "drivingParameters": ["thickness"],
+        "entities": [
+            {"id": "wall.left", "role": "section.centerline.left", "geometryType": "line", "start": (-50, 30), "end": (-50, -30)},
+            {"id": "wall.base", "role": "section.centerline.base", "geometryType": "line", "start": (-50, -30), "end": (50, -30)},
+            {"id": "wall.right", "role": "section.centerline.right", "geometryType": "line", "start": (50, -30), "end": (50, 30)},
+        ],
+        "constraints": [
+            {"id": "path.connected", "constraintType": "coincident", "entityRefs": ["wall.left", "wall.base", "wall.right"]},
+            {"id": "path.fixed", "constraintType": "fixed", "entityRefs": ["wall.left", "wall.base", "wall.right"]},
+        ],
+        "regions": [],
+    })
+    value.geometryRecipe.operations[0].operator = "profile.open_profile_tube_extrude"
+    value.geometryRecipe.operations[0].argumentExpressions = {"length": "length", "thickness": "thickness"}
+    value.geometryRecipe.semanticFaces = [SemanticFaceDefinition.model_validate({
+        "id": "part.face.wall.right",
+        "label": "右侧立壁",
+        "hostFrame": "positiveX",
+        "sourceOperationId": "body.main",
+        "locator": {
+            "kind": "profileEdge",
+            "operationId": "body.main",
+            "profileSketchId": "sketch.section.main",
+            "sourceEntityId": "wall.right",
+        },
+        "uStartExpression": "-30",
+        "uSpanExpression": "60",
+        "vStartExpression": "0",
+        "vSpanExpression": "length",
+    })]
+    value.featureRulesReviewed = True
+    value.featureRules = [FeatureRule.model_validate({
+        "id": "holes.main",
+        "name": "主孔列",
+        "featureType": "circularHole",
+        "countExpression": "1",
+        "arguments": {"x": 0, "diameter": 10},
+        "argumentExpressions": {"z": "length / 2"},
+        "faceBindings": [{"semanticFaceId": "part.face.wall.right"}],
+    })]
+
+    plan = lower_to_plan(value, {"record": {"code": "Q345"}})
+    _, face_map = build_body_with_face_map(plan.operations[0])
+    assert set(face_map) >= {"wall.left", "wall.base", "wall.right"}
+
+    result = execute_plan(plan, tmp_path)
+
     assert result.success, result.diagnostics
     assert result.metrics is not None and result.metrics.solidCount == 1
 
