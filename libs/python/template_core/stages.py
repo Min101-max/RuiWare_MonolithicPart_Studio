@@ -4,7 +4,7 @@ from typing import Any
 
 from .models import CompileResult, StageCheck, StageName, StageValidation, TemplateDraft
 from .stage1 import template_info_fingerprint, validate_template_info
-from .rules import RuleEvaluationError, evaluate_template, expression_names, parameter_evaluation_order
+from .rules import RuleEvaluationError, evaluate_template, expression_names, parameter_evaluation_order, resolve_parameters
 from .material import effective_thickness_domain, material_requirement_mismatches
 from .sketch_solver import solve_semantic_sketch
 from .sweep_path import validate_sweep_path
@@ -658,11 +658,121 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
     }
     interface_parameters_ok = interface_parameter_refs <= parameter_ids
     interface_geometry_ok = interface_geometry_refs <= semantic_face_ids
+    interface_parameter_ids = interface_parameter_refs & parameter_ids
     interface_rule_sources_ok = all(
         item.declarationMode != "featureDerived"
         or bool(item.sourceFeatureRuleId and item.sourceFeatureRuleId in feature_rule_ids)
         for item in draft.interfaces
     )
+    # Contract checks must catch incomplete declarations and contradictory
+    # dimensions before the user advances to CAD review.  Keep these checks
+    # here (rather than in the UI) so GUI and API/MCP callers see the same
+    # actionable reasons.
+    parameter_completeness_reasons: list[str] = []
+    for parameter in draft.parameterDefinitions:
+        if parameter.id not in interface_parameter_ids:
+            continue
+        if not parameter.id.strip() or not parameter.label.strip():
+            parameter_completeness_reasons.append(f"参数 {parameter.id or '<未命名>'} 缺少名称")
+        if parameter.default is None:
+            parameter_completeness_reasons.append(f"参数 {parameter.id} 未填写默认值")
+        if parameter.exposed and parameter.sourceDefinition is None:
+            parameter_completeness_reasons.append(f"公开参数 {parameter.id} 未声明来源")
+        source = parameter.sourceDefinition
+        if source and source.type == "formula" and not (source.expression or "").strip():
+            parameter_completeness_reasons.append(f"公式参数 {parameter.id} 未填写派生公式")
+        if source and source.type == "lookup" and not (source.reference or "").strip():
+            parameter_completeness_reasons.append(f"查表参数 {parameter.id} 未填写查表键表达式")
+        if source and source.type in {
+            "materialProperty", "productConfig", "componentConfig", "projectZone",
+            "standard", "geometricMeasurement", "externalApi",
+        } and not (source.reference or "").strip() and source.fallback is None:
+            parameter_completeness_reasons.append(f"参数 {parameter.id} 的 {source.type} 来源缺少数据路径或回退值")
+    parameter_completeness_ok = not parameter_completeness_reasons
+
+    parameter_values, _, parameter_diagnostics = resolve_parameters(draft.parameterDefinitions)
+    contradiction_reasons: list[str] = []
+    all_numeric_values = {
+        item.id: float(value)
+        for item in draft.parameterDefinitions
+        if item.id in parameter_values
+        and isinstance((value := parameter_values[item.id]), (int, float))
+        and not isinstance(value, bool)
+    }
+    interface_numeric_values = {
+        parameter_id: value
+        for parameter_id, value in all_numeric_values.items()
+        if parameter_id in interface_parameter_ids
+    }
+    for first, second, relation, message in (
+        ("thickness", "sectionWidth", "<", "壁厚必须小于截面宽度"),
+        ("thickness", "sectionHeight", "<=", "壁厚必须小于等于截面高度"),
+        ("length", "thickness", ">", "长度必须大于壁厚"),
+    ):
+        if first not in interface_parameter_ids or second not in interface_parameter_ids:
+            continue
+        if first in interface_numeric_values and second in interface_numeric_values:
+            if relation == "<":
+                valid = interface_numeric_values[first] < interface_numeric_values[second]
+            elif relation == "<=":
+                valid = interface_numeric_values[first] <= interface_numeric_values[second]
+            else:
+                valid = interface_numeric_values[first] > interface_numeric_values[second]
+            if not valid:
+                contradiction_reasons.append(f"{first}={interface_numeric_values[first]:g} 与 {second}={interface_numeric_values[second]:g} 矛盾：{message}")
+    contradiction_reasons.extend(
+        item.message
+        for item in parameter_diagnostics
+        if item.severity == "error"
+        and item.path.startswith("parameterDefinitions.")
+        and item.path.split(".", 2)[1] in interface_parameter_ids
+    )
+    parameter_consistency_ok = not contradiction_reasons
+
+    interface_reasons: list[str] = []
+    interface_ids: set[str] = set()
+    for item in draft.interfaces:
+        if item.id in interface_ids:
+            interface_reasons.append(f"接口 ID 重复：{item.id}")
+        interface_ids.add(item.id)
+        if not item.name.strip():
+            interface_reasons.append(f"接口 {item.id} 未填写名称")
+        if item.declarationMode == "staticGeometry" and not item.geometryRefs:
+            interface_reasons.append(f"静态接口 {item.id} 未关联语义面")
+        if item.declarationMode == "featureDerived" and not item.sourceFeatureRuleId:
+            interface_reasons.append(f"特征派生接口 {item.id} 未选择来源制造特征规则")
+        if item.required and not item.reviewed:
+            interface_reasons.append(f"关键接口 {item.id} 尚未完成工程师复核")
+        if item.interfaceType == "locating" and item.locatingType == "planeContact" and item.region and item.region.mode == "rectangle":
+            if item.region.uSpan is None or item.region.vSpan is None:
+                interface_reasons.append(f"面贴合接口 {item.id} 的矩形区域缺少 U/V 尺寸")
+            elif item.region.uSpan <= 0 or item.region.vSpan <= 0:
+                interface_reasons.append(f"面贴合接口 {item.id} 的矩形区域尺寸必须大于零")
+    interfaces_complete = not interface_reasons
+
+    evaluation = evaluate_template(
+        draft.parameterDefinitions,
+        draft.featureRules,
+        semantic_faces=draft.geometryRecipe.semanticFaces,
+        interfaces=draft.interfaces,
+    )
+    resolved_interface_sources = {
+        item.sourceInterfaceId for item in evaluation.resolvedInterfaces
+    }
+    for item in draft.interfaces:
+        if item.declarationMode == "featureDerived" and item.sourceFeatureRuleId in feature_rule_ids and item.id not in resolved_interface_sources:
+            interface_reasons.append(f"特征派生接口 {item.id} 在标称参数下未生成任何实例")
+    interfaces_complete = not interface_reasons
+    sketch_solution = solve_semantic_sketch(draft, all_numeric_values)
+    feasibility_reasons = [
+        item.message for item in evaluation.diagnostics if item.severity == "error"
+    ]
+    feasibility_reasons.extend(
+        item["message"] for item in sketch_solution["diagnostics"] if item["severity"] == "error"
+    )
+    feasibility_reasons.extend(contradiction_reasons)
+    feasibility_reasons.extend(interface_reasons)
+    part_feasible = not feasibility_reasons and sketch_solution["valid"]
     checks = [
         StageCheck(id="geometry-parameter-contract", label="几何参数契约完整", passed=geometry_contract_ok, severity="error", path="parameterDefinitions", message=f"几何配方与语义面只能引用已声明参数：{', '.join(sorted(geometry_references - parameter_ids)) or '请检查表达式语法'}。"),
         StageCheck(id="parameter-ids", label="参数标识唯一", passed=len(ids) == len(set(ids)), severity="error", path="parameterDefinitions", message="参数标识不能重复。"),
@@ -674,9 +784,13 @@ def validate_variants(draft: TemplateDraft) -> StageValidation:
         StageCheck(id="interface-parameter-refs", label="接口参数引用有效", passed=interface_parameters_ok, severity="error", path="interfaces", message=f"接口只能引用已声明参数：{', '.join(sorted(interface_parameter_refs - parameter_ids)) or '无缺失参数'}。"),
         StageCheck(id="interface-geometry-refs", label="接口几何引用有效", passed=interface_geometry_ok, severity="error", path="interfaces", message=f"接口只能引用已声明语义面：{', '.join(sorted(interface_geometry_refs - semantic_face_ids)) or '无缺失语义面'}。"),
         StageCheck(id="interface-rule-sources", label="特征派生接口来源有效", passed=interface_rule_sources_ok, severity="error", path="interfaces", message="特征派生接口必须选择已有制造特征规则。"),
+        StageCheck(id="interface-completeness", label="零部件接口定义完整且合理", passed=interfaces_complete, severity="error", path="interfaces", message="；".join(interface_reasons) or "接口声明完整，关联基准和复核状态有效。"),
         StageCheck(id="parameter-sources", label="参数来源完整", passed=sources_complete, severity="error", path="parameterDefinitions", message="每个参数必须声明用户输入、材料属性、公式、查表或外部配置来源。"),
+        StageCheck(id="parameter-completeness", label="接口引用参数输入完整", passed=parameter_completeness_ok, severity="error", path="parameterDefinitions", message="；".join(parameter_completeness_reasons) or "接口引用参数均已填写默认值并声明来源。"),
+        StageCheck(id="parameter-consistency", label="接口参数之间无矛盾", passed=parameter_consistency_ok, severity="error", path="parameterDefinitions", message="；".join(contradiction_reasons) or "接口引用参数的范围、依赖和关键尺寸关系一致。"),
         StageCheck(id="parameter-contract-ready", label="规则预声明参数已补全契约", passed=contract_ready, severity="error", path="parameterDefinitions", message="规则页预声明的参数需要在契约页补全后，才能进入试算、验证与发布。"),
         StageCheck(id="parameter-dependency", label="参数依赖图有效", passed=dependency_ok, severity="error", path="parameterDefinitions", message="参数存在未知依赖或循环依赖。"),
+        StageCheck(id="part-feasibility", label="零部件生成可行", passed=part_feasible, severity="error", path="geometryRecipe", message="；".join(feasibility_reasons) or "标称参数下草图、特征和接口均可解析，零部件具备生成条件。"),
     ]
     return _validation("variants", checks)
 
