@@ -399,6 +399,7 @@ export type PartInterface = {
   role?: "primary" | "secondary" | "tertiary" | null;
   geometryRefs: string[];
   referenceFrame: { originRef?: string | null; axis: "x" | "y" | "z" | "-x" | "-y" | "-z" };
+  region?: { mode: "fullFace" | "rectangle"; uStart: number; vStart: number; uSpan?: number | null; vSpan?: number | null } | null;
   parameterRefs: string[];
   compatibilityTags: string[];
   description: string;
@@ -434,6 +435,7 @@ export type ResolvedInterface = {
   interfaceType: PartInterface["interfaceType"];
   geometryRefs: string[];
   parameterRefs: string[];
+  region?: PartInterface["region"];
   sourceFeatureRuleId?: string | null;
   sourceFeatureId?: string | null;
 };

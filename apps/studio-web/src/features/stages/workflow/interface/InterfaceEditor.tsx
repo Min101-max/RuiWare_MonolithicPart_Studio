@@ -1,6 +1,9 @@
+import { useEffect, useState } from "react";
 import { ChevronDown, Link2, Plus, Trash2 } from "lucide-react";
+import { api } from "../../../../api";
 import { Field, PanelTitle } from "../../../../components/ui/FormParts";
-import type { Draft, PartInterface } from "../../../../types";
+import type { CompileResult, Draft, PartInterface, TemplateEvaluation } from "../../../../types";
+import { InterfacePreview3D } from "./InterfacePreview3D";
 
 const uid = (prefix: string) => `${prefix}.${Date.now().toString(36)}`;
 
@@ -13,9 +16,14 @@ const csv = (value: string) =>
 type InterfaceEditorProps = {
   draft: Draft;
   change: (draft: Draft) => void;
+  save?: (draft?: Draft | null) => Promise<Draft | null | undefined>;
 };
 
-export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
+export function InterfaceEditor({ draft, change, save }: InterfaceEditorProps) {
+  const [preview, setPreview] = useState<CompileResult | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewEvaluation, setPreviewEvaluation] = useState<TemplateEvaluation | null>(null);
   const setItems = (interfaces: PartInterface[]) =>
     change({ ...draft, interfaces });
   const geometryRefs = draft.geometryRecipe.semanticFaces;
@@ -53,6 +61,25 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
         reviewed: false,
       },
     ]);
+  const refreshPreview = async () => {
+    setPreviewBusy(true);
+    setPreviewError("");
+    try {
+      const sample = draft.materialValidationSamples.find((item) => item.role === "nominal") || draft.materialValidationSamples[0];
+      const materialSnapshot = { record: { code: sample?.materialCode || "preview", name: sample?.materialName || "预览材料", thickness: sample?.materialThickness }, provenance: { source: "interface-preview" } };
+      const source = save ? await save(draft) : draft;
+      if (!source) return;
+      const result = await api.compilePreview(source, materialSnapshot);
+      setPreview(result);
+      if (source.id) setPreviewEvaluation(await api.evaluate(source.id, { overrides: {} }));
+      if (!result.success) setPreviewError(result.diagnostics.map((item) => item.message).join("；") || "B-Rep 预览未通过");
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "预览生成失败");
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+  useEffect(() => { setPreview(null); setPreviewError(""); }, [draft.id]);
   return (
     <div className="panel">
       <PanelTitle
@@ -221,6 +248,7 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
                           <option value="tertiary">第三定位</option>
                         </select>
                       </Field>
+                      {item.locatingType === "planeContact" && <div className="interface-region-editor"><strong>区域</strong><small>截取该几何面中用作接口的部分，区域坐标使用语义面的 U/V。</small><div className="form-grid four"><Field label="区域方式"><select value={item.region?.mode || "fullFace"} onChange={(event) => edit(index, { region: { mode: event.target.value as "fullFace" | "rectangle", uStart: item.region?.uStart || 0, vStart: item.region?.vStart || 0, uSpan: item.region?.uSpan ?? null, vSpan: item.region?.vSpan ?? null } })}><option value="fullFace">整个几何面</option><option value="rectangle">矩形区域</option></select></Field>{item.region?.mode === "rectangle" && <><Field label="U 起点"><input type="number" value={item.region.uStart} onChange={(event) => edit(index, { region: { ...item.region!, uStart: Number(event.target.value) } })} /></Field><Field label="V 起点"><input type="number" value={item.region.vStart} onChange={(event) => edit(index, { region: { ...item.region!, vStart: Number(event.target.value) } })} /></Field><Field label="U/V 尺寸"><div className="region-size-fields"><input type="number" min="0.001" placeholder="U" value={item.region.uSpan ?? ""} onChange={(event) => edit(index, { region: { ...item.region!, uSpan: Number(event.target.value) || null } })} /><input type="number" min="0.001" placeholder="V" value={item.region.vSpan ?? ""} onChange={(event) => edit(index, { region: { ...item.region!, uSpan: item.region?.uSpan ?? null, vSpan: Number(event.target.value) || null } })} /></div></Field></>}</div></div>}
                     </>
                   )}
                   {item.declarationMode === "staticGeometry" ? (
@@ -360,6 +388,7 @@ export function InterfaceEditor({ draft, change }: InterfaceEditorProps) {
           ))}
         </div>
       )}
+      <InterfacePreview3D draft={draft} result={preview} evaluation={previewEvaluation} busy={previewBusy} error={previewError} onRefresh={() => void refreshPreview()} />
     </div>
   );
 }
