@@ -10,6 +10,8 @@ from typing import Any
 from template_core.material import RuiWareMaterialLibrary, checksum
 from template_core.models import CompileResult, MaterialBinding, PublishedVersion, TemplateDraft
 from template_core.stages import STAGE_ORDER, stage_fingerprint
+from .events import DraftChangedEvent, publish_draft_changed, summarize_draft_change
+from .security import current_principal
 
 
 def _now() -> str:
@@ -73,6 +75,19 @@ class Repository:
                     reason TEXT NOT NULL,
                     PRIMARY KEY (draft_id, revision)
                 );
+                CREATE TABLE IF NOT EXISTS draft_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    draft_id TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    actor TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    session_id TEXT,
+                    created_at TEXT NOT NULL,
+                    summary_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE INDEX IF NOT EXISTS idx_draft_events_draft_id_id
+                    ON draft_events (draft_id, id);
                 CREATE TABLE IF NOT EXISTS compile_runs (
                     id TEXT PRIMARY KEY,
                     draft_id TEXT,
@@ -125,6 +140,9 @@ class Repository:
             columns = {row[1] for row in connection.execute("PRAGMA table_info(template_drafts)")}
             if "archived_at" not in columns:
                 connection.execute("ALTER TABLE template_drafts ADD COLUMN archived_at TEXT")
+            event_columns = {row[1] for row in connection.execute("PRAGMA table_info(draft_events)")}
+            if "summary_json" not in event_columns:
+                connection.execute("ALTER TABLE draft_events ADD COLUMN summary_json TEXT NOT NULL DEFAULT '{}'")
             connection.execute(
                 "INSERT OR IGNORE INTO draft_access (draft_id, owner_id) SELECT id, 'local-dev-user' FROM template_drafts"
             )
@@ -229,6 +247,7 @@ class Repository:
         draft_id = draft.id or f"draft-{uuid.uuid4().hex[:12]}"
         if not self.code_is_unique(draft.code, draft_id):
             raise DuplicateCodeError(draft.code)
+        event: DraftChangedEvent | None = None
         with self.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -286,7 +305,72 @@ class Repository:
                 "INSERT INTO draft_revisions VALUES (?, ?, ?, ?, ?)",
                 (draft_id, next_revision, payload, now, reason),
             )
+            principal = current_principal()
+            affected_stages = list(STAGE_ORDER[changed_index:]) if changed_index is not None else []
+            summary = summarize_draft_change(
+                existing,
+                saved,
+                from_revision=existing.revision if existing else None,
+                affected_stages=affected_stages,
+            )
+            event_cursor = connection.execute(
+                """
+                INSERT INTO draft_events
+                    (draft_id, revision, actor, source, operation, session_id, created_at, summary_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    draft_id,
+                    next_revision,
+                    principal.actor if principal else "system",
+                    principal.source if principal else "system",
+                    reason,
+                    principal.session_id if principal else None,
+                    now,
+                    json.dumps(summary, ensure_ascii=False),
+                ),
+            )
+            event = DraftChangedEvent(
+                id=int(event_cursor.lastrowid),
+                draft_id=draft_id,
+                revision=next_revision,
+                actor=principal.actor if principal else "system",
+                source=principal.source if principal else "system",
+                operation=reason,
+                session_id=principal.session_id if principal else None,
+                created_at=now,
+                summary=summary,
+            )
+        if event is not None:
+            publish_draft_changed(event)
         return saved
+
+    def list_draft_events(self, draft_id: str, *, after_id: int = 0, limit: int = 500) -> list[DraftChangedEvent]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT id, draft_id, revision, actor, source, operation, session_id, created_at, summary_json
+                FROM draft_events
+                WHERE draft_id = ? AND id > ?
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (draft_id, after_id, limit),
+            ).fetchall()
+        return [
+            DraftChangedEvent(
+                id=int(row["id"]),
+                draft_id=row["draft_id"],
+                revision=int(row["revision"]),
+                actor=row["actor"],
+                source=row["source"],
+                operation=row["operation"],
+                session_id=row["session_id"],
+                created_at=row["created_at"],
+                summary=json.loads(row["summary_json"] or "{}"),
+            )
+            for row in rows
+        ]
 
     def get_draft_optional(self, draft_id: str, *, include_archived: bool = False) -> TemplateDraft | None:
         where = "id = ?" if include_archived else "id = ? AND archived_at IS NULL"
