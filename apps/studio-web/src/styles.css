@@ -3567,6 +3567,9 @@ code {
   border-color: #e2c97d;
   background: #fff9e7;
 }
+.rule-expression-warning {
+  margin-top: 10px;
+}
 .field-error {
   display: block;
   margin-top: 3px;
