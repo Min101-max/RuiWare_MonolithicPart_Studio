@@ -4,6 +4,7 @@ import pytest
 
 from cad_worker.geometry import _sketch_sweep, execute_plan
 from cad_worker.operators.body_ops import build_body_with_face_map
+from cad_worker.operators.base_entities import _primitive_edge
 from template_core.lowering import lower_to_plan
 
 from test_lowering import draft
@@ -89,6 +90,42 @@ def test_centerline_thinwall_compiles_as_one_stable_solid(tmp_path) -> None:
     assert result.success, result.diagnostics
     assert result.metrics is not None and result.metrics.solidCount == 1
     assert result.metrics.volume > 0
+
+
+def test_centerline_thinwall_accepts_line_arc_line_round_corner(tmp_path) -> None:
+    value = TemplateDraft(name="centerline rounded thin-wall profile")
+    value.sketch = value.sketch.model_validate({
+        "profileMode": "centerlineThinWall",
+        "drivingParameters": ["thickness"],
+        "entities": [
+            {"id": "wall.base", "role": "section.centerline.base", "geometryType": "line", "start": [-50, 0], "end": [0, 0]},
+            {"id": "wall.corner", "role": "section.centerline.corner", "geometryType": "arc", "center": [0, 20], "radius": 20, "startAngle": -90, "endAngle": 0, "largeArc": False},
+            {"id": "wall.right", "role": "section.centerline.right", "geometryType": "line", "start": [20, 20], "end": [20, 70]},
+        ],
+        "constraints": [
+            {"id": "path.connected.1", "constraintType": "coincident", "entityRefs": ["wall.base", "wall.corner"], "endpointRefs": ["end", "start"]},
+            {"id": "path.connected.2", "constraintType": "coincident", "entityRefs": ["wall.corner", "wall.right"], "endpointRefs": ["end", "start"]},
+            {"id": "path.fixed", "constraintType": "fixed", "entityRefs": ["wall.base", "wall.corner", "wall.right"]},
+        ],
+        "regions": [],
+    })
+    value.geometryRecipe.operations[0].operator = "sketch.centerline_thinwall_extrude"
+    value.geometryRecipe.operations[0].argumentExpressions = {"length": "length", "thickness": "thickness"}
+    result = execute_plan(lower_to_plan(value, {"record": {"code": "Q345"}}), tmp_path)
+    assert result.success, result.diagnostics
+    assert result.metrics is not None and result.metrics.solidCount == 1
+
+
+def test_arc_with_zero_degree_endpoint_is_constructed() -> None:
+    edge = _primitive_edge({
+        "type": "arc",
+        "center": {"x": 0.0, "y": 0.0},
+        "radius": 8.0,
+        "startAngle": 90.0,
+        "endAngle": 0.0,
+        "largeArc": False,
+    })
+    assert not edge.IsNull()
 
 
 @pytest.mark.parametrize("plane", ["XZ", "YZ"])
