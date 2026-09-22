@@ -518,7 +518,7 @@ def _resolve_interface_regions(
             raise RuleEvaluationError("interface region U/V spans must be greater than zero")
         face_start = face_bounds[0] if placement.axis == "u" else face_bounds[2]
         face_span = face_bounds[1] if placement.axis == "u" else face_bounds[3]
-        axis_start = face_start + start_margin
+        axis_start = face_start + start_margin + item_span / 2
         travel = face_span - start_margin - end_margin - item_span
         if travel < -1e-8:
             raise RuleEvaluationError("interface region and placement margins exceed the semantic-face span")
@@ -534,8 +534,8 @@ def _resolve_interface_regions(
     resolved: list[ResolvedInterfaceRegion] = []
     for index in range(count):
         item_context = {**context, region.indexVariable: index, "count": count}
-        u_start = _interface_number(region.uStartExpression, item_context, "interface region U start")
-        v_start = _interface_number(region.vStartExpression, item_context, "interface region V start")
+        u_start = _interface_number(region.uStartExpression, item_context, "interface region U midpoint")
+        v_start = _interface_number(region.vStartExpression, item_context, "interface region V midpoint")
         u_span = _interface_number(region.uSpanExpression, item_context, "interface region U span")
         v_span = _interface_number(region.vSpanExpression, item_context, "interface region V span")
         if u_span <= 0 or v_span <= 0:
@@ -559,9 +559,9 @@ def _resolve_interface_regions(
                 v_start += offset
         if face_bounds is not None:
             face_u_start, face_u_span, face_v_start, face_v_span = face_bounds
-            if u_start < face_u_start - 1e-8 or u_start + u_span > face_u_start + face_u_span + 1e-8:
+            if u_start - u_span / 2 < face_u_start - 1e-8 or u_start + u_span / 2 > face_u_start + face_u_span + 1e-8:
                 raise RuleEvaluationError("interface region exceeds the semantic-face U bounds")
-            if v_start < face_v_start - 1e-8 or v_start + v_span > face_v_start + face_v_span + 1e-8:
+            if v_start - v_span / 2 < face_v_start - 1e-8 or v_start + v_span / 2 > face_v_start + face_v_span + 1e-8:
                 raise RuleEvaluationError("interface region exceeds the semantic-face V bounds")
         resolved.append(ResolvedInterfaceRegion(
             uStart=u_start, vStart=v_start, uSpan=u_span, vSpan=v_span,

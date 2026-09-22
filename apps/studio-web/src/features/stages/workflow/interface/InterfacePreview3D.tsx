@@ -14,8 +14,8 @@ function FaceOverlay({ hostFrame, color, min, max, center, region }: { hostFrame
   const fullV = hostFrame === "negativeZ" || hostFrame === "positiveZ" ? max[1] - min[1] : max[2] - min[2];
   const uSpan = region?.uSpan || fullU;
   const vSpan = region?.vSpan || fullV;
-  const uCenter = region ? region.uStart + uSpan / 2 - (hostFrame === "negativeX" || hostFrame === "positiveX" ? center[1] : center[0]) : (hostFrame === "negativeX" || hostFrame === "positiveX" ? min[1] : min[0]) + uSpan / 2;
-  const vCenter = region ? region.vStart + vSpan / 2 - (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? center[1] : center[2]) : (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? min[1] : min[2]) + vSpan / 2;
+  const uCenter = region ? region.uStart - (hostFrame === "negativeX" || hostFrame === "positiveX" ? center[1] : center[0]) : (hostFrame === "negativeX" || hostFrame === "positiveX" ? min[1] : min[0]) + uSpan / 2;
+  const vCenter = region ? region.vStart - (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? center[1] : center[2]) : (hostFrame === "negativeZ" || hostFrame === "positiveZ" ? min[1] : min[2]) + vSpan / 2;
   if (hostFrame === "negativeY" || hostFrame === "positiveY") {
     const y = (hostFrame === "negativeY" ? min[1] : max[1]) + (hostFrame === "negativeY" ? -offset : offset);
     return <mesh position={[uCenter, y, vCenter]} rotation={[Math.PI / 2, 0, 0]} scale={[uSpan, vSpan, 1]} renderOrder={4}><planeGeometry args={[1, 1]} />{material}<Edges color={color} linewidth={3} /></mesh>;

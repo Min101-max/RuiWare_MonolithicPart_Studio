@@ -83,15 +83,15 @@ function InterfaceRegionEditor({
           </select>
         </Field>
         {region.mode === "rectangle" && <>
-          <Field label="U 起点表达式">{expressionInput(region.uStartExpression, (value) => setRegion({ uStartExpression: value }))}</Field>
-          <Field label="V 起点表达式">{expressionInput(region.vStartExpression, (value) => setRegion({ vStartExpression: value }))}</Field>
+          <Field label="U 中点表达式">{expressionInput(region.uStartExpression, (value) => setRegion({ uStartExpression: value }))}</Field>
+          <Field label="V 中点表达式">{expressionInput(region.vStartExpression, (value) => setRegion({ vStartExpression: value }))}</Field>
           <Field label="U 尺寸表达式">{expressionInput(region.uSpanExpression, (value) => setRegion({ uSpanExpression: value }))}</Field>
           <Field label="V 尺寸表达式">{expressionInput(region.vSpanExpression, (value) => setRegion({ vSpanExpression: value }))}</Field>
         </>}
       </div>
       {region.mode === "rectangle" && <div className="interface-region-placement">
         <strong>布置规则</strong>
-        <small>规则语义与制造特征一致；自动布置以矩形起点为定位点，并保证矩形不超出语义面。</small>
+        <small>规则语义与制造特征一致；U/V 方向均以矩形中点为定位点，并保证矩形不超出语义面。</small>
         <div className="form-grid three">
           <Field label="布置方式">
             <select value={region.placement.mode} onChange={(event) => setPlacement({ mode: event.target.value as typeof region.placement.mode })}>

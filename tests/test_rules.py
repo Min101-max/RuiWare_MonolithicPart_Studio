@@ -399,9 +399,73 @@ def test_interface_rectangle_expressions_and_linear_placement_are_resolved() -> 
     )
 
     assert evaluation.success, evaluation.diagnostics
-    assert [item.region.vStart for item in evaluation.resolvedInterfaces if item.region] == [50, 250, 450]
+    assert [item.region.vStart for item in evaluation.resolvedInterfaces if item.region] == [100, 300, 500]
     assert all(item.region and item.region.uStart == -30 for item in evaluation.resolvedInterfaces)
     assert all(item.region and item.region.uSpan == 25 for item in evaluation.resolvedInterfaces)
+
+
+def test_interface_rectangle_u_start_is_the_region_midpoint() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口 U 中点",
+        "interfaces": [{
+            "id": "interface.center",
+            "name": "中心区域",
+            "geometryRefs": ["part.face.front"],
+            "region": {
+                "mode": "rectangle",
+                "uStartExpression": "0",
+                "vStartExpression": "100",
+                "uSpanExpression": "40",
+                "vSpanExpression": "20",
+            },
+        }],
+    })
+
+    evaluation = evaluate_template(
+        draft.parameterDefinitions,
+        [],
+        semantic_faces=draft.geometryRecipe.semanticFaces,
+        interfaces=draft.interfaces,
+    )
+
+    assert evaluation.success, evaluation.diagnostics
+    region = evaluation.resolvedInterfaces[0].region
+    assert region is not None
+    assert region.uStart == 0
+    assert region.uStart - region.uSpan / 2 == -20
+    assert region.uStart + region.uSpan / 2 == 20
+
+
+def test_interface_rectangle_v_start_is_the_region_midpoint() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口 V 中点",
+        "interfaces": [{
+            "id": "interface.centerV",
+            "name": "中心区域",
+            "geometryRefs": ["part.face.front"],
+            "region": {
+                "mode": "rectangle",
+                "uStartExpression": "0",
+                "vStartExpression": "100",
+                "uSpanExpression": "40",
+                "vSpanExpression": "20",
+            },
+        }],
+    })
+
+    evaluation = evaluate_template(
+        draft.parameterDefinitions,
+        [],
+        semantic_faces=draft.geometryRecipe.semanticFaces,
+        interfaces=draft.interfaces,
+    )
+
+    assert evaluation.success, evaluation.diagnostics
+    region = evaluation.resolvedInterfaces[0].region
+    assert region is not None
+    assert region.vStart == 100
+    assert region.vStart - region.vSpan / 2 == 90
+    assert region.vStart + region.vSpan / 2 == 110
 
 
 def test_legacy_numeric_interface_rectangle_is_migrated_to_expressions() -> None:
