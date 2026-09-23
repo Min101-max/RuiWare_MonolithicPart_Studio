@@ -291,6 +291,20 @@ class InterfaceReferenceFrame(BaseModel):
     axis: Literal["x", "y", "z", "-x", "-y", "-z"] = "z"
 
 
+class InterfaceRegion(BaseModel):
+    mode: Literal["fullFace", "rectangle"] = "fullFace"
+    uStart: float = 0.0
+    vStart: float = 0.0
+    uSpan: float | None = Field(default=None, gt=0)
+    vSpan: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_rectangle(self) -> "InterfaceRegion":
+        if self.mode == "rectangle" and (self.uSpan is None or self.vSpan is None):
+            raise ValueError("矩形接口区域必须填写 U/V 尺寸")
+        return self
+
+
 class PartInterface(BaseModel):
     """A single-part declaration of stable geometry available to a future assembly."""
 
@@ -303,6 +317,7 @@ class PartInterface(BaseModel):
     role: Literal["primary", "secondary", "tertiary"] | None = None
     geometryRefs: list[str] = Field(default_factory=list)
     referenceFrame: InterfaceReferenceFrame = Field(default_factory=InterfaceReferenceFrame)
+    region: InterfaceRegion | None = None
     parameterRefs: list[str] = Field(default_factory=list)
     compatibilityTags: list[str] = Field(default_factory=list)
     description: str = ""
@@ -378,6 +393,7 @@ class ResolvedInterface(BaseModel):
     interfaceType: Literal["locating", "connecting", "supporting", "adjustable", "processDatum", "other"]
     geometryRefs: list[str] = Field(default_factory=list)
     parameterRefs: list[str] = Field(default_factory=list)
+    region: InterfaceRegion | None = None
     sourceFeatureRuleId: str | None = None
     sourceFeatureId: str | None = None
 
