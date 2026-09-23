@@ -504,6 +504,7 @@ def resolve_part_interfaces(
                 interfaceType=interface.interfaceType,
                 geometryRefs=interface.geometryRefs,
                 parameterRefs=interface.parameterRefs,
+                region=interface.region,
             ))
             continue
 
@@ -526,6 +527,7 @@ def resolve_part_interfaces(
                 interfaceType=interface.interfaceType,
                 geometryRefs=[feature.semanticFaceId],
                 parameterRefs=interface.parameterRefs,
+                region=interface.region,
                 sourceFeatureRuleId=rule_id,
                 sourceFeatureId=feature.id,
             ))

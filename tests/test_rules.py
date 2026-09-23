@@ -351,6 +351,118 @@ def test_interface_parameter_and_geometry_refs_are_checked() -> None:
     assert not next(item for item in result.checks if item.id == "interface-geometry-refs").passed
 
 
+def test_contract_checks_interface_completeness_and_parameter_consistency() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "契约合理性检查",
+        "parameterDefinitions": [
+            {"id": "length", "label": "长度", "default": 20, "minimum": 1, "maximum": 100},
+            {"id": "sectionWidth", "label": "宽度", "default": 10, "minimum": 1, "maximum": 100},
+            {"id": "sectionHeight", "label": "高度", "default": 10, "minimum": 1, "maximum": 100},
+            {"id": "thickness", "label": "壁厚", "default": 12, "minimum": 1, "maximum": 20},
+        ],
+        "interfaces": [{
+            "id": "interface.empty",
+            "name": "",
+            "required": True,
+            "reviewed": False,
+            "parameterRefs": ["length", "sectionWidth", "sectionHeight", "thickness"],
+        }],
+    })
+    result = validate_stage("variants", draft)
+
+    completeness = next(item for item in result.checks if item.id == "interface-completeness")
+    consistency = next(item for item in result.checks if item.id == "parameter-consistency")
+    feasibility = next(item for item in result.checks if item.id == "part-feasibility")
+    assert not completeness.passed
+    assert "未填写名称" in completeness.message
+    assert "未关联语义面" in completeness.message
+    assert not consistency.passed
+    assert "壁厚必须小于截面宽度" in consistency.message
+    assert not feasibility.passed
+
+
+def test_contract_parameter_consistency_ignores_unreferenced_parameters() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口参数范围检查",
+        "parameterDefinitions": [
+            {"id": "sectionWidth", "label": "宽度", "default": 10, "minimum": 1, "maximum": 100},
+            {"id": "thickness", "label": "壁厚", "default": 12, "minimum": 1, "maximum": 20},
+        ],
+        "interfaces": [{
+            "id": "interface.width",
+            "name": "宽度接口",
+            "parameterRefs": ["sectionWidth"],
+        }],
+    })
+
+    result = validate_stage("variants", draft)
+
+    consistency = next(item for item in result.checks if item.id == "parameter-consistency")
+    assert consistency.passed
+
+
+def test_contract_parameter_height_allows_equal_thickness() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "壁厚高度边界检查",
+        "parameterDefinitions": [
+            {"id": "sectionHeight", "label": "高度", "default": 10, "minimum": 1, "maximum": 100},
+            {"id": "thickness", "label": "壁厚", "default": 10, "minimum": 1, "maximum": 20},
+        ],
+        "interfaces": [{
+            "id": "interface.height",
+            "name": "高度接口",
+            "parameterRefs": ["sectionHeight", "thickness"],
+        }],
+    })
+
+    result = validate_stage("variants", draft)
+
+    consistency = next(item for item in result.checks if item.id == "parameter-consistency")
+    assert consistency.passed
+
+
+def test_contract_parameter_completeness_ignores_unreferenced_parameters() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "接口参数完整性检查",
+        "parameterDefinitions": [
+            {"id": "width", "label": "宽度", "default": 10},
+            {"id": "derived", "label": "派生值", "default": 1, "source": "formula", "sourceDefinition": {"type": "formula"}},
+        ],
+        "interfaces": [{
+            "id": "interface.width",
+            "name": "宽度接口",
+            "parameterRefs": ["width"],
+        }],
+    })
+
+    result = validate_stage("variants", draft)
+
+    completeness = next(item for item in result.checks if item.id == "parameter-completeness")
+    assert completeness.passed
+
+
+def test_contract_checks_source_specific_parameter_inputs() -> None:
+    draft = TemplateDraft.model_validate({
+        "name": "参数来源完整性检查",
+        "parameterDefinitions": [{
+            "id": "derived",
+            "label": "派生值",
+            "default": 1,
+            "source": "formula",
+            "sourceDefinition": {"type": "formula"},
+        }],
+        "interfaces": [{
+            "id": "interface.derived",
+            "name": "派生接口",
+            "parameterRefs": ["derived"],
+        }],
+    })
+    result = validate_stage("variants", draft)
+    check = next(item for item in result.checks if item.id == "parameter-completeness")
+    assert not check.passed
+    assert "未填写派生公式" in check.message
+
+
 def test_valid_variant_overrides_must_match_parameter_contract() -> None:
     draft = TemplateDraft.model_validate({
         "name": "变体覆盖值测试",
