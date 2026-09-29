@@ -39,9 +39,15 @@ def download_source_package(
     )
 
 
-def get_reconstruction_guide(repository: Repository, draft_id: str) -> str:
+def get_reconstruction_guide(
+    repository: Repository,
+    draft_id: str,
+    expected_revision: int | None = None,
+) -> str:
     """读取当前草稿修订对应的 Markdown 重建说明书，不创建新修订。"""
-    return build_reconstruction_guide(repository, draft_or_404(repository, draft_id))
+    draft = draft_or_404(repository, draft_id)
+    ensure_draft_revision(draft, expected_revision)
+    return build_reconstruction_guide(repository, draft)
 
 
 def compile_template_draft(

@@ -139,7 +139,9 @@ export const api = {
   updateAttachment: (id: string, attachmentId: string, input: { description: string; kind?: string }) => request<Draft>(`/api/v1/template-drafts/${id}/attachments/${attachmentId}`, json("PATCH", input)),
   removeAttachment: (id: string, attachmentId: string) => request<Draft>(`/api/v1/template-drafts/${id}/attachments/${attachmentId}`, { method: "DELETE" }),
   sourcePackageUrl: (id: string) => `/api/v1/template-drafts/${id}/source-package`,
-  reconstructionGuide: (id: string) => requestText(`/api/v1/template-drafts/${id}/reconstruction-guide`),
+  reconstructionGuide: (id: string, expectedRevision?: number) => requestText(
+    `/api/v1/template-drafts/${id}/reconstruction-guide${expectedRevision === undefined ? "" : `?expectedRevision=${expectedRevision}`}`,
+  ),
   reconstructionGuideUrl: (id: string) => `/api/v1/template-drafts/${id}/reconstruction-guide`,
 };
 

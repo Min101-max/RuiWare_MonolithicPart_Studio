@@ -38,4 +38,17 @@ describe("API workspace context", () => {
     await expect(api.reconstructionGuide("draft-1")).resolves.toBe("# C型冷弯立柱");
     expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/template-drafts/draft-1/reconstruction-guide");
   });
+
+  it("requests a reconstruction guide for an expected saved revision", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => "# C型冷弯立柱",
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await api.reconstructionGuide("draft-1", 12);
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/v1/template-drafts/draft-1/reconstruction-guide?expectedRevision=12");
+  });
 });

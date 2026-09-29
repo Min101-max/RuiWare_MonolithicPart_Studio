@@ -74,16 +74,21 @@ export function parseGuideMarkdown(markdown: string): GuideBlock[] {
   return blocks;
 }
 
+export function splitGuideBlocks(markdown: string): { main: GuideBlock[]; technical: GuideBlock[] } {
+  const blocks = parseGuideMarkdown(markdown);
+  const index = blocks.findIndex((block) => block.type === "heading" && block.text === "技术附录");
+  if (index < 0) return { main: blocks, technical: [] };
+  return { main: blocks.slice(0, index), technical: blocks.slice(index) };
+}
+
 function inlineText(text: string): ReactNode {
   return text.split(/(`[^`]+`)/g).map((part, index) =>
     part.startsWith("`") && part.endsWith("`") ? <code key={index}>{part.slice(1, -1)}</code> : <Fragment key={index}>{part}</Fragment>,
   );
 }
 
-export function MarkdownGuidePreview({ markdown }: { markdown: string }) {
-  return (
-    <div className="reconstruction-guide-content">
-      {parseGuideMarkdown(markdown).map((block, index) => {
+function renderGuideBlocks(blocks: GuideBlock[]) {
+  return blocks.map((block, index) => {
         if (block.type === "heading") {
           const Tag = (`h${Math.min(block.level, 4)}`) as "h1" | "h2" | "h3" | "h4";
           return <Tag key={index}>{inlineText(block.text)}</Tag>;
@@ -103,7 +108,20 @@ export function MarkdownGuidePreview({ markdown }: { markdown: string }) {
             </table>
           </div>
         );
-      })}
+  });
+}
+
+export function MarkdownGuidePreview({ markdown }: { markdown: string }) {
+  const { main, technical } = splitGuideBlocks(markdown);
+  return (
+    <div className="reconstruction-guide-content">
+      {renderGuideBlocks(main)}
+      {technical.length > 0 && (
+        <details className="reconstruction-guide-technical">
+          <summary>查看技术详情</summary>
+          {renderGuideBlocks(technical)}
+        </details>
+      )}
     </div>
   );
 }

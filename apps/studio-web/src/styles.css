@@ -2430,8 +2430,24 @@ code {
   font-size: 8px;
   text-decoration: none;
 }
+.reconstruction-guide-panel {
+  align-self: start;
+}
+
 .reconstruction-guide-panel .panel-title {
   align-items: center;
+}
+
+.reconstruction-guide-download-btn {
+  min-height: 38px;
+  padding: 0 16px;
+  box-shadow: 0 4px 12px rgba(215, 144, 57, 0.24);
+}
+
+.reconstruction-guide-download-btn:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.55;
 }
 .reconstruction-guide-state {
   display: flex;
@@ -2500,6 +2516,25 @@ code {
   border-left: 3px solid #7aaf9e;
   background: #edf7f3;
   color: #42665a;
+}
+.reconstruction-guide-technical {
+  margin-top: 16px;
+  border: 1px solid #d6e0e4;
+  border-radius: 4px;
+  background: #f7fafb;
+}
+.reconstruction-guide-technical summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  color: #48636e;
+  font-weight: 700;
+}
+.reconstruction-guide-technical[open] summary {
+  border-bottom: 1px solid #d6e0e4;
+}
+.reconstruction-guide-technical > *:not(summary) {
+  margin-left: 10px;
+  margin-right: 10px;
 }
 .reconstruction-guide-table-wrap {
   overflow-x: auto;

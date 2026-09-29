@@ -611,9 +611,9 @@ def download_source_package(draft_id: str):
 
 
 @app.get("/api/v1/template-drafts/{draft_id}/reconstruction-guide", response_class=PlainTextResponse)
-def get_reconstruction_guide(draft_id: str):
+def get_reconstruction_guide(draft_id: str, expectedRevision: int | None = Query(default=None, ge=1)):
     return PlainTextResponse(
-        get_reconstruction_guide_service(repository, draft_id),
+        get_reconstruction_guide_service(repository, draft_id, expectedRevision),
         media_type="text/markdown; charset=utf-8",
         headers={"Content-Disposition": "inline"},
     )
