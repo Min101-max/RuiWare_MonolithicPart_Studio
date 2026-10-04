@@ -87,6 +87,24 @@ bun install
 - Studio：`http://127.0.0.1:5173`
 - API 文档：`http://127.0.0.1:8010/docs`
 
+## 共享模板 MinIO 配置
+
+每台电脑只配置自己的 MinIO 账号，密钥只保存在本机环境变量中，不写入 Git、前端代码或文档。
+
+```powershell
+$env:RUIWARE_MINIO_ENDPOINT = '100.94.35.61:9000'
+$env:RUIWARE_MINIO_ACCESS_KEY = 'JJM'
+$env:RUIWARE_MINIO_SECRET_KEY = '本机账号密钥'
+$env:RUIWARE_MINIO_BUCKET = 'ruiware-templates'
+$env:RUIWARE_MINIO_PREFIX = 'publishers/JJM'
+$env:RUIWARE_MINIO_READ_PREFIX = 'publishers'
+$env:RUIWARE_MINIO_SECURE = 'false'
+```
+
+将 `JJM` 和密钥替换为当前成员自己的账号。程序先完成本地发布，再尝试上传远程包；远程不可用时，本地发布仍然保留。
+
+远程对象为 `publishers/<成员>/<publicationId>/template.rwpart` 和同目录下的 `metadata.json`。下载时会校验 SHA-256，校验失败不会返回文件。
+
 首次启动后建议打开 Studio、选择一个模板、运行“阶段检查”；需要验证 CAD 时，再运行“B-Rep 编译”。
 
 ## 5. 建议的交付前检查
