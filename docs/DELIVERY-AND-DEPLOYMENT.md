@@ -105,6 +105,34 @@ $env:RUIWARE_MINIO_SECURE = 'false'
 
 远程对象为 `publishers/<成员>/<publicationId>/template.rwpart` 和同目录下的 `metadata.json`。下载时会校验 SHA-256，校验失败不会返回文件。
 
+## 对外模板接口
+
+平台需要读取共享模板时，不要直接连接 MinIO，也不要向平台发放成员或管理员的 MinIO 密钥。模板 API 提供只读接口，外部平台只保存单独的 API Key。
+
+在运行 API 服务的机器上配置：
+
+```powershell
+$env:RUIWARE_PUBLIC_API_KEY = '由管理员生成的一串随机密钥'
+```
+
+接口如下：
+
+```text
+GET /api/public/v1/templates
+GET /api/public/v1/templates/{publicationId}
+GET /api/public/v1/templates/{publicationId}/download
+```
+
+请求头：
+
+```text
+X-RuiWare-API-Key: 由管理员发放的 API Key
+```
+
+列表响应只返回模板编号、版本、名称、SHA-256、大小和下载地址，不暴露 MinIO 的对象路径。下载接口返回 `.rwpart` 文件，并通过 `X-RuiWare-SHA256` 返回完整性摘要。
+
+开发机默认只监听 `127.0.0.1`。如果需要让局域网或反向代理访问，可在启动 API 前设置 `$env:RUIWARE_API_HOST = '0.0.0.0'`；正式环境仍应使用 HTTPS 反向代理，并只开放 API 端口，不开放 MinIO 的 `9000/9001`。
+
 首次启动后建议打开 Studio、选择一个模板、运行“阶段检查”；需要验证 CAD 时，再运行“B-Rep 编译”。
 
 ## 5. 建议的交付前检查
