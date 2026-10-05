@@ -698,3 +698,13 @@ STEP / STL / diagnostics / semantic-map
 - `tests/test_remote_template_storage.py`、`tests/test_shared_templates_api.py`：验证远程同步降级、上传状态、共享列表、下载校验失败等行为。
 
 远程对象按 `publishers/<成员>/<publicationId>/template.rwpart` 和同目录 `metadata.json` 存储。MinIO 凭据只通过本地环境变量配置，不提交 Git。
+
+## 对外模板只读 API
+
+- `services/template-api/app/security.py`：通过 `RUIWARE_PUBLIC_API_KEY` 验证外部平台请求，不复用成员 MinIO 密钥。
+- `services/template-api/app/main.py`：提供 `/api/public/v1/templates` 列表、单个模板元数据和 `.rwpart` 下载接口；响应会隐藏 MinIO 对象路径。
+- `services/template-api/app/errors.py`：提供公开接口未配置和 API Key 无效的稳定错误码。
+- `start-dev.ps1`：通过 `RUIWARE_API_HOST` 配置 API 监听地址，默认仍为本机地址，避免开发环境意外暴露。
+- `tests/test_public_templates_api.py`：验证 API Key、元数据脱敏、下载和未配置错误。
+
+公开接口只读，不允许外部平台修改、发布或删除模板。正式部署时由 HTTPS 反向代理暴露 API，MinIO 的 `9000/9001` 端口保持私有。

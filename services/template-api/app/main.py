@@ -11,6 +11,7 @@ import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -90,7 +91,7 @@ from .services.operations import (  # noqa: E402
     set_current_draft as set_current_draft_service,
 )  # noqa: E402
 from .services.write_context import parse_write_context  # noqa: E402
-from .security import bind_request, release_request, current_owner_id, signed_session  # noqa: E402
+from .security import bind_request, release_request, current_owner_id, require_public_api_key, signed_session  # noqa: E402
 from .event_stream import stream_draft_events  # noqa: E402
 from .services.remote_storage import RemoteStorageIntegrityError, build_remote_storage  # noqa: E402
 
@@ -673,6 +674,81 @@ def download_shared_template(publication_id: str):
         raise api_error("REMOTE_STORAGE_NOT_CONFIGURED", status_code=503, retryable=False)
     try:
         content, metadata = storage.download_package(publication_id)
+    except KeyError as exc:
+        raise api_error("REMOTE_TEMPLATE_NOT_FOUND", status_code=404, context={"publicationId": publication_id}) from exc
+    except RemoteStorageIntegrityError as exc:
+        raise api_error("REMOTE_STORAGE_INTEGRITY_ERROR", status_code=502, context={"publicationId": publication_id}) from exc
+    except Exception as exc:
+        raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503, context={"detail": str(exc)}) from exc
+    filename = f"{metadata.get('code', publication_id)}-V{metadata.get('version', 'unknown')}.rwpart"
+    return StreamingResponse(
+        iter([content]),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-RuiWare-SHA256": str(metadata.get("sha256", "")),
+        },
+    )
+
+
+def _public_template_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    publication_id = str(metadata.get("publicationId", ""))
+    return {
+        "publicationId": publication_id,
+        "templateId": metadata.get("templateId"),
+        "version": metadata.get("version"),
+        "code": metadata.get("code"),
+        "name": metadata.get("name"),
+        "createdAt": metadata.get("createdAt"),
+        "sha256": metadata.get("sha256"),
+        "size": metadata.get("size"),
+        "downloadUrl": f"/api/public/v1/templates/{quote(publication_id, safe='')}/download",
+    }
+
+
+def _public_storage_or_error():
+    storage = build_remote_storage()
+    if storage is None:
+        raise api_error("REMOTE_STORAGE_NOT_CONFIGURED", status_code=503, retryable=False)
+    return storage
+
+
+@app.get("/api/public/v1/templates")
+def list_public_templates(request: Request, limit: int = Query(default=100, ge=1, le=1000)):
+    require_public_api_key(request)
+    try:
+        items = [_public_template_metadata(item) for item in _public_storage_or_error().list_templates()[:limit]]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503, context={"detail": str(exc)}) from exc
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/public/v1/templates/{publication_id}")
+def get_public_template(publication_id: str, request: Request):
+    require_public_api_key(request)
+    try:
+        metadata = next(
+            (item for item in _public_storage_or_error().list_templates() if item.get("publicationId") == publication_id),
+            None,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise api_error("REMOTE_STORAGE_UNAVAILABLE", status_code=503, context={"detail": str(exc)}) from exc
+    if metadata is None:
+        raise api_error("REMOTE_TEMPLATE_NOT_FOUND", status_code=404, context={"publicationId": publication_id})
+    return _public_template_metadata(metadata)
+
+
+@app.get("/api/public/v1/templates/{publication_id}/download")
+def download_public_template(publication_id: str, request: Request):
+    require_public_api_key(request)
+    try:
+        content, metadata = _public_storage_or_error().download_package(publication_id)
+    except HTTPException:
+        raise
     except KeyError as exc:
         raise api_error("REMOTE_TEMPLATE_NOT_FOUND", status_code=404, context={"publicationId": publication_id}) from exc
     except RemoteStorageIntegrityError as exc:
