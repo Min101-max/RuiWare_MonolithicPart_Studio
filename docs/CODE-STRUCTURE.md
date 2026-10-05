@@ -688,3 +688,13 @@ STEP / STL / diagnostics / semantic-map
 - 补充 `draft_events`、`draft_access`、`operation_audit` 等当前数据库表职责。
 - 补充 `sweep_path*`、语义面、CAD 算子分类、MCP 创建/回滚/审计工具和当前测试分布。
 - 增加模板重建说明书生成器、发布页预览/下载面板、只读说明书 API，以及 `.rwpart` 内说明书和校验摘要的结构说明。
+## 共享模板 MinIO
+
+- `services/template-api/app/config.py`：读取每台电脑本地的 MinIO 连接配置，不保存密钥。
+- `services/template-api/app/services/remote_storage.py`：MinIO 适配器，负责发布包上传、共享模板列表、下载和 SHA-256 完整性校验。
+- `services/template-api/app/services/workflow.py`：本地发布完成后调用远程同步；远程失败不会回滚本地发布。
+- `services/template-api/app/main.py`：提供共享模板列表、下载接口，并在发布响应中返回 `remoteSync` 状态。
+- `apps/studio-web/src/features/stages/review/admission/SharedTemplatesPanel.tsx`：发布页中的共享模板列表和下载入口。
+- `tests/test_remote_template_storage.py`、`tests/test_shared_templates_api.py`：验证远程同步降级、上传状态、共享列表、下载校验失败等行为。
+
+远程对象按 `publishers/<成员>/<publicationId>/template.rwpart` 和同目录 `metadata.json` 存储。MinIO 凭据只通过本地环境变量配置，不提交 Git。
